@@ -188,6 +188,7 @@ class TouchAreaViewController(
             touchAreaPageDown.visibility = View.VISIBLE
             touchAreaDragCustomize.visibility =
                 if (config.touchAreaHint && allowMoveTouchArea()) View.VISIBLE else View.GONE
+            touchAreaDragCustomize.setBackgroundColor(Color.argb(32, 0, 0, 0))
             showTouchAreaHint()
         }
     }
