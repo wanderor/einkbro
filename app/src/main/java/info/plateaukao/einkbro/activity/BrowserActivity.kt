@@ -65,6 +65,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewModelScope
 import com.google.android.material.snackbar.Snackbar
 import info.plateaukao.einkbro.R
+import info.plateaukao.einkbro.addons.BaiduSyncer
 import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.browser.BrowserContainer
 import info.plateaukao.einkbro.browser.BrowserController
@@ -289,6 +290,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private lateinit var createBookmarkFileLauncher: ActivityResultLauncher<Intent>
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
 
+    private lateinit var baiduSyncer: BaiduSyncer
+
     // Classes
     private inner class VideoCompletionListener : OnCompletionListener,
         MediaPlayer.OnErrorListener {
@@ -357,6 +360,20 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         }
         handleWindowInsets()
         listenKeyboardShowHide()
+
+        val openUrls = { urls: Set<String> ->
+            urls.forEach  { url ->
+                addAlbum(url = url, foreground = false)
+            }
+        }
+        val closeAlbums = { controllers: Set<AlbumController> ->
+            controllers.forEach { controller ->
+                removeAlbum(controller, false)
+            }
+        }
+        baiduSyncer = BaiduSyncer(
+            this, mainContentLayout, browserContainer,
+            openUrls, closeAlbums, activityResultRegistry)
     }
 
     private fun handleWindowInsets() {
