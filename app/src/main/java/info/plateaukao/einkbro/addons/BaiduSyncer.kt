@@ -280,15 +280,15 @@ class BaiduSyncer(
 
     // Initializes configuration from the specified file.
     private fun initConfigFromFile(file: File): Boolean {
-        log("Checking path for config: %s".format(file.path))
+        log("Checking path for config: ${file.path}")
         if (file.exists()) {
             try {
                 val text = file.readText()
                 config = Json.decodeFromString<BaiduSyncerConfig>(text)
-                log("Loaded config from %s".format(file.path))
+                log("Loaded config from ${file.path}")
                 return true
             } catch (e: IOException) {
-                log("Failed to load config: %s".format(e.toString()))
+                log("Failed to load config: ${e.toString()}")
             }
         }
         return false
@@ -320,14 +320,14 @@ class BaiduSyncer(
                 val file = File(dir, CONFIG_FILENAME)
                 try {
                     file.writeBytes(bytes)
-                    log("Wrote config to %s".format(file))
+                    log("Wrote config to $file")
                     if (initConfigFromFile(file)) {
                         display("Installed new config")
                         start()
                     }
                     return
                 } catch (e: IOException) {
-                    log(Log.ERROR, "Failed to install config to %s: %s".format(file, e.toString()))
+                    log(Log.ERROR, "Failed to install config to $file: ${e.toString()}")
                 }
             }
         }
@@ -345,11 +345,11 @@ class BaiduSyncer(
         // Loads certain pieces of data.
         shared_preferences.getString("waitingUrls", null)?.let {
             waitingUrls = Json.decodeFromString(it)
-            log("Loaded %s waiting URLs".format(waitingUrls.size))
+            log("Loaded ${waitingUrls.size} waiting URLs")
         }
         shared_preferences.getString("recentUrls", null)?.let {
             recentUrls = Json.decodeFromString(it)
-            log("Loaded %s recent URLs".format(recentUrls.size))
+            log("Loaded ${recentUrls.size} recent URLs")
         }
 
         // Initializes Retrofit.
@@ -367,7 +367,7 @@ class BaiduSyncer(
             try {
                 heartbeat()
             } catch (e: Exception) {
-                log(Log.ERROR, "Heartbeat failed: %s".format(e.stackTraceToString()))
+                log(Log.ERROR, "Heartbeat failed: ${e.stackTraceToString()}")
             }
         })
     }
@@ -382,14 +382,13 @@ class BaiduSyncer(
 
     // Synchronizes between local and cloud.
     private fun sync(now: Long) {
-        log("Sync started: sending=%s, receiving=%s".format(config.sending, config.receiving))
+        log("Sync started: sending=${config.sending}, receiving=${config.receiving}")
 
         // Gathers local information.
         val openUrls = listUrls()
         val closedUrls = prevUrls.subtract(openUrls)
         closedUrls.forEach { recentUrls[it] = now }  // will inspect when merging from cloud
-        log("Local URLs: open=%s, closed=%s, waiting=%s".format(
-            openUrls.size, closedUrls.size, waitingUrls.size))
+        log("Local URLs: open=${openUrls.size}, closed=${closedUrls.size}, waiting=${waitingUrls.size}")
 
         // Note: keep the logics between read and write of cloud data minimal and fast, to
         // reduce the race condition of peers.
@@ -460,10 +459,9 @@ class BaiduSyncer(
 
         // Gives user an update.
         if (merger.cloudSource.isNotEmpty()) {
-            display("Synced with %s: %s opened, %s closed, %s waiting".format(
-                merger.cloudSource, slots, urlsToClose.size, waitingUrls.size))
+            display("Synced with ${merger.cloudSource}: $slots opened, ${urlsToClose.size} closed, ${waitingUrls.size} waiting")
         } else if (waitingUrls.isNotEmpty()) {
-            display("%s waiting".format(waitingUrls.size))
+            display("${waitingUrls.size} waiting")
         }
 
         // Persists certain pieces of data.
@@ -488,13 +486,12 @@ class BaiduSyncer(
     private fun mergeFromCloud(merger: Merger): Boolean {
         val cloudMtime = readCloudMtime()
         if (cloudMtime != null && cloudMtime <= lastCloudMtime) {
-            log("Ignore obsolete cloud state: now=%s prev=%s".format(cloudMtime, lastCloudMtime))
+            log("Ignore obsolete cloud state: now=$cloudMtime prev=$lastCloudMtime")
             return false
         }
 
         readFromCloud()?.let { state ->
-            log("Received state from '%s': open=%d closed=%d [time: '%s']".format(
-                state.name, state.urls.size, state.closed.size, state.timestamp))
+            log("Received state from '${state.name}': open=${state.urls.size} closed=${state.closed.size} [time: '${state.timestamp}']")
             if (state.version == "1.0.0") {
                 if (state.timestamp > lastUpdateTime) {
                     merger.cloudSource = state.name
@@ -510,11 +507,10 @@ class BaiduSyncer(
                     lastUpdateTime = state.timestamp
                     return true
                 } else {
-                    log("Ignore obsolete cloud state: now=%s prev=%s".format(
-                        state.timestamp, lastUpdateTime))
+                    log("Ignore obsolete cloud state: now=${state.timestamp} prev=$lastUpdateTime")
                 }
             } else {
-                log(Log.ERROR, "Ignore unrecognized version: [%s]".format(state.version))
+                log(Log.ERROR, "Ignore unrecognized version: [${state.version}]")
             }
         }
         return false
@@ -565,13 +561,13 @@ class BaiduSyncer(
                         log(Log.ERROR, "Metadata incorrect or broken")
                     } else {
                         val mtime = meta.list.get(0).mtime
-                        log("Got cloud mtime: %s".format(mtime))
+                        log("Got cloud mtime: $mtime")
                         return mtime
                     }
                 }
             }
         } catch (e: IOException) {
-            log(Log.ERROR, "Failed to check cloud mtime: %s".format(e.toString()))
+            log(Log.ERROR, "Failed to check cloud mtime: ${e.toString()}")
         }
         return null
     }
@@ -587,22 +583,20 @@ class BaiduSyncer(
                         val bytes = GZIPInputStream(it.byteStream()).readBytes()
                         val state =
                             Json.decodeFromString<BrowserState>(bytes.toString(UTF_8))
-                        log("Succeeded to read from cloud (attempt #%d)".format(i))
+                        log("Succeeded to read from cloud (attempt #$i)")
                         return state
                     }
                 }
-                log(Log.ERROR, "Failed to read from cloud (attempt #%d): response - %s".format(
-                    i, response.toString()))
+                log(Log.ERROR, "Failed to read from cloud (attempt #$i): response - ${response.toString()}")
             } catch (e: IOException) {
-                log(Log.ERROR, "Failed to read from cloud (attempt #%d): exception - %s".format(
-                    i, e.toString()))
+                log(Log.ERROR, "Failed to read from cloud (attempt #$i): exception - ${e.toString()}")
             }
         }
         return null
     }
 
     private fun writeToCloud(state: BrowserState): BrowserFileStat? {
-        log("Writing state to cloud: open=%d closed=%d".format(state.urls.size, state.closed.size))
+        log("Writing state to cloud: open=${state.urls.size} closed=${state.closed.size}")
         val stream = ByteArrayOutputStream()
         with(GZIPOutputStream(stream)) {
             val bytes = Json.encodeToString(state).toByteArray(UTF_8)
@@ -627,17 +621,15 @@ class BaiduSyncer(
                         if (stat.mtime == null) {
                             log(Log.ERROR, "Stat parsing is broken, likely buggy")
                         } else {
-                            log("Succeeded to write to cloud (attempt #%d)".format(i))
+                            log("Succeeded to write to cloud (attempt #$i)")
                             return stat
                         }
                     }
                 } else {
-                    log(Log.ERROR, "Failed to write to cloud (attempt #%d): response - %s".format(
-                        i, response.toString()))
+                    log(Log.ERROR, "Failed to write to cloud (attempt #$i): response - ${response.toString()}")
                 }
             } catch (e: IOException) {
-                log(Log.ERROR, "Failed to write to cloud (attempt #%d): exception - %s".format(
-                    i, e.toString()))
+                log(Log.ERROR, "Failed to write to cloud (attempt #$i): exception - ${e.toString()}")
             }
         }
         return null
@@ -655,7 +647,7 @@ class BaiduSyncer(
                 .filter { !it.startsWith("data") }
                 .filter { it.isNotBlank() && it != "about:blank" }
                 .toSet()
-            log("Listed %s URLs from %s tabs".format(urls.size, controllers.size))
+            log("Listed ${urls.size} URLs from ${controllers.size} tabs")
             synchronized(lock) { result = urls }
         }
         var ongoing = true
