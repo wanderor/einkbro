@@ -363,7 +363,7 @@ class BaiduSyncer(
         // Starts timer for periodical sync.
         val delay = 1000L * config.startup
         val period = 1000L * config.heartbeat
-        timer(initialDelay = delay, period = period, action = {
+        timer(daemon = true, initialDelay = delay, period = period, action = {
             try {
                 heartbeat()
             } catch (e: Exception) {
@@ -386,6 +386,10 @@ class BaiduSyncer(
 
         // Gathers local information.
         val openUrls = listUrls()
+        if (openUrls.isEmpty()) {
+            log("Skipping sync: no local URLs found")
+            return
+        }
         val closedUrls = prevUrls.subtract(openUrls)
         closedUrls.forEach { recentUrls[it] = now }  // will inspect when merging from cloud
         log("Local URLs: open=${openUrls.size}, closed=${closedUrls.size}, waiting=${waitingUrls.size}")
