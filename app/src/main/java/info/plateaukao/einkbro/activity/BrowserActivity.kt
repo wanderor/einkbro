@@ -476,6 +476,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                             translationViewModel.updateInputMessage(actionModeMenuViewModel.selectedText.value)
                             val selectedTextWithContext = ninjaWebView.getSelectedTextWithContext()
                             translationViewModel.updateMessageWithContext(selectedTextWithContext)
+                            translationViewModel.url = ninjaWebView.url ?: ""
                             TranslateDialogFragment(
                                 translationViewModel,
                                 externalSearchWebView,
@@ -494,6 +495,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                             if (translationViewModel.hasOpenAiApiKey()) {
                                 translationViewModel.updateTranslateMethod(TRANSLATE_API.GPT)
                                 translationViewModel.gptActionInfo = state.gptAction
+                                translationViewModel.url = ninjaWebView.url ?: ""
                                 TranslateDialogFragment(
                                     translationViewModel,
                                     externalSearchWebView,
@@ -649,6 +651,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                     updateTranslateMethod(TRANSLATE_API.GPT)
                     gptActionInfo = ChatGPTActionInfo(systemMessage = config.gptUserPromptForWebPage)
                 }
+                translationViewModel.url = ninjaWebView.url ?: ""
                 TranslateDialogFragment(
                     translationViewModel,
                     externalSearchWebView,
