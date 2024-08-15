@@ -14,16 +14,15 @@ import com.google.gson.annotations.Expose
 import com.google.android.material.snackbar.Snackbar
 import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.browser.BrowserContainer
+import info.plateaukao.einkbro.view.NinjaWebView
 import kotlin.math.max
 import kotlin.math.min
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody
-import okhttp3.internal.wait
 import retrofit2.Call
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -92,6 +91,8 @@ private data class BaiduSyncerConfig(
     val sending: Boolean = false,
     // Whether to receive BrowserState data from the cloud.
     val receiving: Boolean = false,
+    // Whether to preload inactive tabs in background.
+    val preloading: Boolean = false,
     // Maximum number of retries (besides initial attempt).
     val retries: Int = 0,
     // Maximum number of URLs to open locally.
@@ -182,6 +183,12 @@ class BaiduSyncer(
         private const val EXTERNAL_LOG_PATH: String =
             "/storage/emulated/0/Android/data/info.plateaukao.einkbro/files/baidu.log"
 
+        // Normalizes the URL of an album controller for dedup.
+        private fun normalizeUrl(controller: AlbumController): String {
+            val url = controller.albumUrl.ifBlank { controller.initAlbumUrl }
+            return normalizeUrl(url)
+        }
+
         // Normalizes a URL for dedup.
         private fun normalizeUrl(url: String): String {
             // Removes hash.
@@ -206,8 +213,8 @@ class BaiduSyncer(
 
     // Configuration.
     private var config: BaiduSyncerConfig = BaiduSyncerConfig()
-    //
-    private var lastSyncTime: Long = 0
+    // Timestamp of the last action.
+    private var lastActionTime: Long = 0
     // We check 2 timestamps when reading from the cloud:
     // - cloud file mtime.
     // - timestamp string written in the file.
@@ -363,20 +370,21 @@ class BaiduSyncer(
         // Starts timer for periodical sync.
         val delay = 1000L * config.startup
         val period = 1000L * config.heartbeat
-        timer(daemon = true, initialDelay = delay, period = period, action = {
+        timer(daemon = true, initialDelay = delay, period = period) {
             try {
                 heartbeat()
             } catch (e: Exception) {
                 log(Log.ERROR, "Heartbeat failed: ${e.stackTraceToString()}")
             }
-        })
+        }
     }
 
     private fun heartbeat() {
         val now = Date().time
-        if (now >= lastSyncTime + config.interval * 1000L) {
-            lastSyncTime = now  // update even if sync() fails
+        if (now >= lastActionTime + config.interval * 1000L) {
+            lastActionTime = now  // update even if action fails
             sync(now)
+            preload()
         }
     }
 
@@ -639,32 +647,80 @@ class BaiduSyncer(
         return null
     }
 
+    // Preload inactive tabs in background.
+    private fun preload() {
+        if (!config.preloading) return
+
+        val total = runAndWait(period = config.wait * 1000L, repeated = true) {
+            var result = Pair(true, 0)
+            for (controller in browserContainer.list()) {
+                val webView = controller as NinjaWebView
+                if (!webView.album.isLoaded && webView.initAlbumUrl.isNotEmpty()) {
+                    log(Log.DEBUG, "Preloading ${webView.initAlbumUrl}")
+                    webView.loadUrl(webView.initAlbumUrl)
+                    result = Pair(false, 1)
+                    break
+                }
+            }
+            result
+        }
+        log("Preloaded $total inactive tabs")
+    }
+
     // List normalized URLs of the currently open web pages in the local browser.
     private fun listUrls(): Set<String> {
-        var result: Set<String>? = null
-        val lock = Object()
-        handler.post {
+        lateinit var result: Set<String>
+        runAndWait(period = 1000) {
             val controllers = browserContainer.list()
             val urls = controllers
                 .filter { !it.isTranslatePage }
-                .map { normalizeUrl(it.albumUrl) }
+                .map { normalizeUrl(it) }
                 .filter { !it.startsWith("data") }
                 .filter { it.isNotBlank() && it != "about:blank" }
                 .toSet()
             log("Listed ${urls.size} URLs from ${controllers.size} tabs")
-            synchronized(lock) { result = urls }
+            result = urls
+            Pair(true, 0)
         }
-        var ongoing = true
-        while (ongoing) {
-            Thread.sleep(1000)
-            synchronized(lock) { result?.let { ongoing = false } }
+        return result
+    }
+
+    // Run an action and wait for its completion.
+    //
+    // `action` function should return a pair:
+    // - `done`: (Boolean) Whether to end the repeated action.
+    // - `progress`: (Int) this function accumulates this value and returns the sum.
+    // Return: accumulated sum of `progress` values.
+    private fun runAndWait(period: Long,
+                           repeated: Boolean = false,
+                           action: () -> Pair<Boolean, Int>): Int {
+        val lock = Object()
+        var done = false
+        var total = 0
+
+        var actionPosted = false
+        var loopDone = false
+        while (!loopDone) {
+            if (repeated || !actionPosted) {
+                handler.post {
+                    val result = action()
+                    synchronized(lock) {
+                        total += result.second
+                        if (!repeated || result.first) { done = true }
+                    }
+                }
+                actionPosted = true
+            }
+            Thread.sleep(period)
+            synchronized(lock) { loopDone = done }
         }
-        return result!!
+        return total
     }
 
     // Opens the specified URLs in the local browser.
     private fun openUrls(urls: Iterable<String>) {
         urls.forEach { url ->
+            log(Log.DEBUG, "Opening $url")
             val subset: Set<String> = setOf(url)
             handler.post {
                 openUrlsFunc(subset)
@@ -678,7 +734,7 @@ class BaiduSyncer(
         handler.post {
             val controllers: Set<AlbumController> = browserContainer.list()
                 .filter { !it.isTranslatePage }
-                .filter { urls.contains(normalizeUrl(it.albumUrl)) }
+                .filter { urls.contains(normalizeUrl(it)) }
                 .toSet()
             closeAlbumsFunc(controllers)
         }
