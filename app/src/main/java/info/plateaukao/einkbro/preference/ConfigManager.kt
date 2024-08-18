@@ -29,7 +29,7 @@ import kotlin.reflect.KProperty
 
 class ConfigManager(
     private val context: Context,
-    private val sp: SharedPreferences
+    private val sp: SharedPreferences,
 ) : KoinComponent {
 
     fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
@@ -45,7 +45,6 @@ class ConfigManager(
     var isToolbarOnTop by BooleanPreference(sp, K_TOOLBAR_TOP, false)
     var enableViBinding by BooleanPreference(sp, K_VI_BINDING, false)
     var isMultitouchEnabled by BooleanPreference(sp, K_MULTITOUCH, false)
-    var whiteBackground by BooleanPreference(sp, K_WHITE_BACKGROUND, false)
     var useUpDownPageTurn by BooleanPreference(sp, K_UPDOWN_PAGE_TURN, false)
     var touchAreaHint by BooleanPreference(sp, K_TOUCH_HINT, true)
     var volumePageTurn by BooleanPreference(sp, K_VOLUME_PAGE_TURN, true)
@@ -288,19 +287,66 @@ class ConfigManager(
 
     var favoriteUrl by StringPreference(sp, K_FAVORITE_URL, Constants.DEFAULT_HOME_URL)
 
-    //use stringset in sharedpreference
+    //use string set in sharedpreference
     var scrollFixList: List<String>
         get() = sp.getStringSet(K_SCROLL_FIX_LIST, mutableSetOf())?.toList() ?: emptyList()
         set(value) = sp.edit { putStringSet(K_SCROLL_FIX_LIST, value.toSet()) }
 
     fun shouldFixScroll(url: String): Boolean = scrollFixList.contains(Uri.parse(url).host)
+    fun toggleFixScroll(url: String): Boolean = Uri.parse(url)?.host?.let { host ->
+        scrollFixList = scrollFixList.toMutableList().apply {
+            if (scrollFixList.contains(host)) remove(host) else add(host)
+        }
+        shouldFixScroll(url)
+    } ?: false
+
+    // use string set to store the list of sending page navigation key
+    private var sendPageNavKeyList: List<String>
+        get() = sp.getStringSet(K_SEND_PAGE_NAV_KEY_LIST, mutableSetOf())?.toList() ?: emptyList()
+        set(value) = sp.edit { putStringSet(K_SEND_PAGE_NAV_KEY_LIST, value.toSet()) }
+
+    fun shouldSendPageNavKey(url: String): Boolean =
+        sendPageNavKeyList.contains(Uri.parse(url).host)
+
+    fun toggleSendPageNavKey(url: String): Boolean = Uri.parse(url)?.host?.let { host ->
+        sendPageNavKeyList = sendPageNavKeyList.toMutableList().apply {
+            if (sendPageNavKeyList.contains(host)) remove(host) else add(host)
+        }
+        shouldSendPageNavKey(url)
+    } ?: false
+
+    private var translateSiteList: List<String>
+        get() = sp.getStringSet(K_TRANSLATE_SITE_LIST, mutableSetOf())?.toList() ?: emptyList()
+        set(value) = sp.edit { putStringSet(K_TRANSLATE_SITE_LIST, value.toSet()) }
+
+    fun shouldTranslateSite(url: String): Boolean = translateSiteList.contains(Uri.parse(url).host)
+
+    fun toggleTranslateSite(url: String): Boolean = Uri.parse(url)?.host?.let { host ->
+        translateSiteList = translateSiteList.toMutableList().apply {
+            if (translateSiteList.contains(host)) remove(host) else add(host)
+        }
+        shouldTranslateSite(url)
+    } ?: false
+
+    // use string set to store the url list of having white background
+    private var whiteBackgroundList: List<String>
+        get() = sp.getStringSet(K_WHITE_BACKGROUND_LIST, mutableSetOf())?.toList() ?: emptyList()
+        set(value) = sp.edit { putStringSet(K_WHITE_BACKGROUND_LIST, value.toSet()) }
+
+    fun whiteBackground(url: String): Boolean = whiteBackgroundList.contains(Uri.parse(url).host)
+    fun toggleWhiteBackground(url: String): Boolean = Uri.parse(url)?.host?.let { host ->
+        whiteBackgroundList = whiteBackgroundList.toMutableList().apply {
+            if (whiteBackgroundList.contains(host)) remove(host) else add(host)
+        }
+        whiteBackground(url)
+    } ?: false
 
     var toolbarActions: List<ToolbarAction>
         get() {
             val key =
                 if (ViewUnit.isLandscape(context)) K_TOOLBAR_ICONS_FOR_LARGE else K_TOOLBAR_ICONS
             val iconListString =
-                sp.getString(key, sp.getString(K_TOOLBAR_ICONS, getDefaultIconStrings())) ?: ""
+                sp.getString(key, sp.getString(K_TOOLBAR_ICONS, getDefaultIconStrings())).orEmpty()
             return iconStringToEnumList(iconListString)
         }
         set(value) {
@@ -314,7 +360,7 @@ class ConfigManager(
     var customFontInfo: CustomFontInfo?
         get() = sp.getString(K_CUSTOM_FONT, "")?.toCustomFontInfo()
         set(value) {
-            sp.edit { putString(K_CUSTOM_FONT, value?.toSerializedString() ?: "") }
+            sp.edit { putString(K_CUSTOM_FONT, value?.toSerializedString().orEmpty()) }
             if (fontType == FontType.CUSTOM) {
                 customFontChanged = true
             }
@@ -322,7 +368,7 @@ class ConfigManager(
     var readerCustomFontInfo: CustomFontInfo?
         get() = sp.getString(K_READER_CUSTOM_FONT, "")?.toCustomFontInfo()
         set(value) {
-            sp.edit { putString(K_READER_CUSTOM_FONT, value?.toSerializedString() ?: "") }
+            sp.edit { putString(K_READER_CUSTOM_FONT, value?.toSerializedString().orEmpty()) }
             if (fontType == FontType.CUSTOM) {
                 customFontChanged = true
             }
@@ -330,7 +376,7 @@ class ConfigManager(
 
     var recentBookmarks: List<RecentBookmark>
         get() {
-            val string = sp.getString(K_RECENT_BOOKMARKS, "") ?: ""
+            val string = sp.getString(K_RECENT_BOOKMARKS, "").orEmpty()
             if (string.isBlank()) return emptyList()
 
             return try {
@@ -382,7 +428,7 @@ class ConfigManager(
 
     var savedAlbumInfoList: List<AlbumInfo>
         get() {
-            val string = sp.getString(K_SAVED_ALBUM_INFO, "") ?: ""
+            val string = sp.getString(K_SAVED_ALBUM_INFO, "").orEmpty()
             if (string.isBlank()) return emptyList()
 
             return try {
@@ -455,7 +501,7 @@ class ConfigManager(
 
     var fabCustomPosition: Point
         get() {
-            val str = sp.getString(K_FAB_POSITION, "") ?: ""
+            val str = sp.getString(K_FAB_POSITION, "").orEmpty()
             return if (str.isBlank()) Point(0, 0)
             else Point(str.split(",").first().toInt(), str.split(",").last().toInt())
         }
@@ -465,7 +511,7 @@ class ConfigManager(
 
     var fabCustomPositionLandscape: Point
         get() {
-            val str = sp.getString(K_FAB_POSITION_LAND, "") ?: ""
+            val str = sp.getString(K_FAB_POSITION_LAND, "").orEmpty()
             return if (str.isBlank()) Point(0, 0)
             else Point(str.split(",").first().toInt(), str.split(",").last().toInt())
         }
@@ -475,7 +521,7 @@ class ConfigManager(
 
     var splitSearchItemInfoList: List<SplitSearchItemInfo>
         get() {
-            val str = sp.getString(K_SPLIT_SEARCH_ITEMS, "") ?: ""
+            val str = sp.getString(K_SPLIT_SEARCH_ITEMS, "").orEmpty()
             return if (str.isBlank()) emptyList()
             else str.split("###").mapNotNull {
                 decodeFromString(SplitSearchItemInfo.serializer(), it)
@@ -537,7 +583,7 @@ class ConfigManager(
 
     var gptActionList: List<ChatGPTActionInfo>
         get() {
-            val str = sp.getString(K_GPT_ACTION_ITEMS, "") ?: ""
+            val str = sp.getString(K_GPT_ACTION_ITEMS, "").orEmpty()
             return if (str.isBlank()) {
                 if (gptSystemPrompt.isNotBlank() || gptUserPromptPrefix.isNotBlank()) {
                     listOf(
@@ -562,7 +608,7 @@ class ConfigManager(
 
     var gptActionForExternalSearch: ChatGPTActionInfo?
         get() {
-            val str = sp.getString(K_GPT_ACTION_EXTERNAL, "") ?: ""
+            val str = sp.getString(K_GPT_ACTION_EXTERNAL, "").orEmpty()
             return if (str.isBlank()) null
             else str.convertToDataClass<ChatGPTActionInfo>()
         }
@@ -619,6 +665,9 @@ class ConfigManager(
         const val K_TOOLBAR_ICONS = "sp_toolbar_icons"
         const val K_TOOLBAR_ICONS_FOR_LARGE = "sp_toolbar_icons_for_large"
         const val K_SCROLL_FIX_LIST = "sp_scroll_fix_list"
+        const val K_SEND_PAGE_NAV_KEY_LIST = "sp_send_page_nav_key_list"
+        const val K_TRANSLATE_SITE_LIST = "sp_translate_site_list"
+        const val K_WHITE_BACKGROUND_LIST = "sp_white_background_list"
         const val K_BOLD_FONT = "sp_bold_font"
         const val K_BLACK_FONT = "sp_black_font"
         const val K_NAV_POSITION = "nav_position"
@@ -799,7 +848,7 @@ class ConfigManager(
 class BooleanPreference(
     private val sharedPreferences: SharedPreferences,
     private val key: String,
-    private val defaultValue: Boolean = false
+    private val defaultValue: Boolean = false,
 ) : ReadWriteProperty<Any, Boolean> {
 
     override fun getValue(thisRef: Any, property: KProperty<*>): Boolean =
@@ -813,7 +862,7 @@ class BooleanPreference(
 class IntPreference(
     private val sharedPreferences: SharedPreferences,
     private val key: String,
-    private val defaultValue: Int = 0
+    private val defaultValue: Int = 0,
 ) : ReadWriteProperty<Any, Int> {
 
     override fun getValue(thisRef: Any, property: KProperty<*>): Int =
@@ -826,7 +875,7 @@ class IntPreference(
 class StringPreference(
     private val sharedPreferences: SharedPreferences,
     private val key: String,
-    private val defaultValue: String = ""
+    private val defaultValue: String = "",
 ) : ReadWriteProperty<Any, String> {
 
     override fun getValue(thisRef: Any, property: KProperty<*>): String =
@@ -923,8 +972,8 @@ enum class HighlightStyle(
     ),
     BACKGROUND_NONE(
         null,
-    R.string.menu_delete,
-    R.drawable.icon_delete,
+        R.string.menu_delete,
+        R.drawable.icon_delete,
     )
 }
 

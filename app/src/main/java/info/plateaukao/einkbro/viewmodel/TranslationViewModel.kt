@@ -8,6 +8,7 @@ import info.plateaukao.einkbro.database.BookmarkManager
 import info.plateaukao.einkbro.database.ChatGptQuery
 import info.plateaukao.einkbro.preference.ChatGPTActionInfo
 import info.plateaukao.einkbro.preference.ConfigManager
+import info.plateaukao.einkbro.preference.GptActionType
 import info.plateaukao.einkbro.service.ChatMessage
 import info.plateaukao.einkbro.service.ChatRole
 import info.plateaukao.einkbro.service.OpenAiRepository
@@ -61,7 +62,12 @@ class TranslationViewModel : ViewModel(), KoinComponent {
     private val _translateMethod = MutableStateFlow(config.externalSearchMethod)
     val translateMethod: StateFlow<TRANSLATE_API> = _translateMethod.asStateFlow()
 
+    private val _showEditDialogWithIndex = MutableStateFlow(-1)
+    val showEditDialogWithIndex: StateFlow<Int> = _showEditDialogWithIndex.asStateFlow()
+
     var url: String = ""
+
+    private var toBeSavedResponseString = ""
 
     fun updateRotateResultScreen(rotate: Boolean) {
         _rotateResultScreen.value = rotate
@@ -119,7 +125,7 @@ class TranslationViewModel : ViewModel(), KoinComponent {
 
     fun translate(
         translateApi: TRANSLATE_API = _translateMethod.value,
-        userMessage: String? = null
+        userMessage: String? = null,
     ) {
         _translateMethod.value = translateApi
         config.externalSearchMethod = translateApi
@@ -156,7 +162,7 @@ class TranslationViewModel : ViewModel(), KoinComponent {
             val document = Jsoup.parse(String(byteArray))
             val container = document.getElementById("contents")
             var content = ""
-            content += container?.getElementsByClass("section")?.html() ?: ""
+            content += container?.getElementsByClass("section")?.html().orEmpty()
             //_responseMessage.value = content
             //_responseMessage.value = String(byteArray)
             _responseMessage.value =
@@ -181,12 +187,12 @@ class TranslationViewModel : ViewModel(), KoinComponent {
     private fun callDeepLTranslate() {
         val message = _inputMessage.value
         viewModelScope.launch(Dispatchers.IO) {
-            val targetLanguage = if (config.translationLanguage == TranslationLanguage.ZH_TW ||
-                config.translationLanguage == TranslationLanguage.ZH_CN
-            ) {
-                "zh"
-            } else {
-                config.translationLanguage.value
+            val targetLanguage = when (config.translationLanguage) {
+                TranslationLanguage.ZH_TW,
+                TranslationLanguage.ZH_CN,
+                -> "zh"
+
+                else -> config.translationLanguage.value
             }
             _responseMessage.value =
                 AnnotatedString(
@@ -244,6 +250,14 @@ class TranslationViewModel : ViewModel(), KoinComponent {
         return result?.renderedImage
     }
 
+    fun showEditGptActionDialog(gptActionInfoIndex: Int) {
+        _showEditDialogWithIndex.value = gptActionInfoIndex
+    }
+
+    fun resetEditDialogIndex() {
+        _showEditDialogWithIndex.value = -1
+    }
+
     fun saveTranslationResult() {
         viewModelScope.launch {
             val (_, selectedText) = getSelectedTextAndPromptPrefix()
@@ -251,11 +265,12 @@ class TranslationViewModel : ViewModel(), KoinComponent {
                 ChatGptQuery(
                     date = System.currentTimeMillis(),
                     url = url,
-                    model = gptActionInfo.name,
+                    model = gptActionInfo.model,
                     selectedText = selectedText,
-                    result = _responseMessage.value.text
+                    result = toBeSavedResponseString,
                 )
             )
+            toBeSavedResponseString = ""
             _responseMessage.value = AnnotatedString("Saved.")
         }
     }
@@ -277,50 +292,75 @@ class TranslationViewModel : ViewModel(), KoinComponent {
         val (promptPrefix, selectedText) = getSelectedTextAndPromptPrefix()
         messages.add("$promptPrefix$selectedText".toUserMessage())
 
-        // stream case
-        if (config.enableOpenAiStream) {
-            viewModelScope.launch(Dispatchers.IO) {
-                var responseString = ""
-                openAiRepository.chatStream(
-                    messages,
-                    appendResponseAction = {
-                        if (_responseMessage.value.text == "...") {
-                            responseString = it
-                        } else {
-                            responseString += it
-                        }
-                        _responseMessage.value = HelperUnit.parseMarkdown(responseString.unescape())
-                    },
-                    doneAction = { },
-                    failureAction = {
-                        _responseMessage.value = AnnotatedString("## Something went wrong.")
-                    }
-                )
-            }
-            return
-        }
-
-        // normal case: too slow!!!
         viewModelScope.launch(Dispatchers.IO) {
-            if (config.useGeminiApi && config.geminiApiKey.isNotBlank()) {
-                val result = openAiRepository.queryGemini(
-                    messages,
-                    apiKey = config.geminiApiKey
-                )
-                _responseMessage.value = AnnotatedString(result)
-            } else {
-                val chatCompletion = openAiRepository.chatCompletion(messages)
-                if (chatCompletion == null || chatCompletion.choices.isEmpty()) {
-                    _responseMessage.value = AnnotatedString("Something went wrong.")
-                    return@launch
-                } else {
-                    val responseContent = chatCompletion.choices
-                        .firstOrNull { it.message.role == ChatRole.Assistant }?.message?.content
-                        ?: "Something went wrong."
-                    _responseMessage.value = AnnotatedString(responseContent)
+            when (gptActionInfo.actionType) {
+                GptActionType.OpenAi -> queryOpenAi(messages)
+                GptActionType.Gemini -> queryGemini(messages)
+                GptActionType.SelfHosted,
+                GptActionType.Default,
+                -> { // Default
+                    if (config.useGeminiApi && config.geminiApiKey.isNotBlank()) {
+                        queryGemini(messages)
+                    } else {
+                        queryOpenAi(messages)
+                    }
                 }
             }
         }
+    }
+
+    private suspend fun queryOpenAi(messages: MutableList<ChatMessage>) {
+        if (config.enableOpenAiStream) {
+            queryWithStream(messages, GptActionType.OpenAi)
+            return
+        }
+
+        val chatCompletion = openAiRepository.chatCompletion(messages)
+        if (chatCompletion == null || chatCompletion.choices.isEmpty()) {
+            _responseMessage.value = AnnotatedString("Something went wrong.")
+            return
+        } else {
+            val responseContent = chatCompletion.choices
+                .firstOrNull { it.message.role == ChatRole.Assistant }?.message?.content
+                ?: "Something went wrong."
+            toBeSavedResponseString = responseContent
+            _responseMessage.value = AnnotatedString(responseContent)
+        }
+    }
+
+    private suspend fun queryGemini(messages: MutableList<ChatMessage>) {
+        if (config.enableOpenAiStream) {
+            queryWithStream(messages, GptActionType.Gemini)
+            return
+        }
+
+        val result = openAiRepository.queryGemini(
+            messages,
+            apiKey = config.geminiApiKey
+        )
+        toBeSavedResponseString = result
+        _responseMessage.value = AnnotatedString(result)
+    }
+
+    private fun queryWithStream(messages: MutableList<ChatMessage>, gptActionType: GptActionType) {
+        var responseString = ""
+        openAiRepository.chatStream(
+            messages,
+            gptActionType,
+            appendResponseAction = {
+                if (_responseMessage.value.text == "...") {
+                    responseString = it
+                } else {
+                    responseString += it
+                }
+                toBeSavedResponseString = responseString.unescape()
+                _responseMessage.value = HelperUnit.parseMarkdown(toBeSavedResponseString)
+            },
+            doneAction = { },
+            failureAction = {
+                _responseMessage.value = AnnotatedString("## Something went wrong.")
+            }
+        )
     }
 
     private fun getSelectedTextAndPromptPrefix(): Pair<String, String> {

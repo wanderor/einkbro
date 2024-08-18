@@ -119,8 +119,10 @@ import info.plateaukao.einkbro.view.dialog.compose.FontDialogFragment
 import info.plateaukao.einkbro.view.dialog.compose.LanguageSettingDialogFragment
 import info.plateaukao.einkbro.view.dialog.compose.MenuDialogFragment
 import info.plateaukao.einkbro.view.dialog.compose.ReaderFontDialogFragment
+import info.plateaukao.einkbro.view.dialog.compose.ShowEditGptActionDialogFragment
 import info.plateaukao.einkbro.view.dialog.compose.TouchAreaDialogFragment
 import info.plateaukao.einkbro.view.dialog.compose.TranslateDialogFragment
+import info.plateaukao.einkbro.view.dialog.compose.TranslationConfigDlgFragment
 import info.plateaukao.einkbro.view.handlers.GestureHandler
 import info.plateaukao.einkbro.view.handlers.MenuActionHandler
 import info.plateaukao.einkbro.view.handlers.ToolbarActionHandler
@@ -256,7 +258,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     override fun duplicateTab() {
         val webView = currentAlbumController as NinjaWebView
-        val title = webView.title ?: ""
+        val title = webView.title.orEmpty()
         val url = webView.url ?: return
         addAlbum(title, url)
     }
@@ -348,11 +350,10 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         }
 
         initLanguageLabel()
-
         initTouchAreaViewController()
-
         initTextSearchButton()
         initExternalSearchCloseButton()
+        initTranslationViewModel()
 
         if (config.hideStatusbar) {
             hideStatusBar()
@@ -373,6 +374,18 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         baiduSyncer = BaiduSyncer(
             this, mainContentLayout, browserContainer,
             openUrls, closeAlbums, activityResultRegistry)
+    }
+
+    private fun initTranslationViewModel() {
+        lifecycleScope.launch {
+            translationViewModel.showEditDialogWithIndex.collect { index ->
+                if (index == -1) return@collect
+                ShowEditGptActionDialogFragment(index)
+                    .showNow(supportFragmentManager, "editGptAction")
+                translationViewModel.resetEditDialogIndex()
+            }
+        }
+
     }
 
     private fun handleWindowInsets() {
@@ -476,7 +489,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                             translationViewModel.updateInputMessage(actionModeMenuViewModel.selectedText.value)
                             val selectedTextWithContext = ninjaWebView.getSelectedTextWithContext()
                             translationViewModel.updateMessageWithContext(selectedTextWithContext)
-                            translationViewModel.url = ninjaWebView.url ?: ""
+                            translationViewModel.url = ninjaWebView.url.orEmpty()
                             TranslateDialogFragment(
                                 translationViewModel,
                                 externalSearchWebView,
@@ -495,7 +508,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                             if (translationViewModel.hasOpenAiApiKey()) {
                                 translationViewModel.updateTranslateMethod(TRANSLATE_API.GPT)
                                 translationViewModel.gptActionInfo = state.gptAction
-                                translationViewModel.url = ninjaWebView.url ?: ""
+                                translationViewModel.url = ninjaWebView.url.orEmpty()
                                 TranslateDialogFragment(
                                     translationViewModel,
                                     externalSearchWebView,
@@ -533,8 +546,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         ninjaWebView.highlightTextSelection(highlightStyle)
 
         // work on db saving
-        val url = ninjaWebView.url ?: ""
-        val title = ninjaWebView.title ?: ""
+        val url = ninjaWebView.url.orEmpty()
+        val title = ninjaWebView.title.orEmpty()
         val article = Article(title, url, System.currentTimeMillis(), "")
 
         val articleInDb =
@@ -649,9 +662,10 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 with(translationViewModel) {
                     updateInputMessage(ninjaWebView.getRawText())
                     updateTranslateMethod(TRANSLATE_API.GPT)
-                    gptActionInfo = ChatGPTActionInfo(systemMessage = config.gptUserPromptForWebPage)
+                    gptActionInfo =
+                        ChatGPTActionInfo(systemMessage = config.gptUserPromptForWebPage)
                 }
-                translationViewModel.url = ninjaWebView.url ?: ""
+                translationViewModel.url = ninjaWebView.url.orEmpty()
                 TranslateDialogFragment(
                     translationViewModel,
                     externalSearchWebView,
@@ -1270,7 +1284,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
             Intent.ACTION_WEB_SEARCH -> {
                 initSavedTabs()
-                val searchedKeyword = intent.getStringExtra(SearchManager.QUERY) ?: ""
+                val searchedKeyword = intent.getStringExtra(SearchManager.QUERY).orEmpty()
                 if (currentAlbumController != null && config.isExternalSearchInSameTab) {
                     ninjaWebView.loadUrl(searchedKeyword)
                 } else {
@@ -1292,7 +1306,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
             Intent.ACTION_SEND -> {
                 initSavedTabs()
-                val sentKeyword = intent.getStringExtra(Intent.EXTRA_TEXT) ?: ""
+                val sentKeyword = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
                 val url =
                     if (BrowserUnit.isURL(sentKeyword)) sentKeyword else externalSearchViewModel.generateSearchUrl(
                         sentKeyword
@@ -1354,7 +1368,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 // set minimize button visible
                 externalSearchViewModel.setButtonVisibility(true)
             }
-            null -> { }
+
+            null -> {}
             else -> addAlbum()
         }
         getIntent().action = ""
@@ -1499,7 +1514,9 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     override fun showTranslationConfigDialog(translateDirectly: Boolean) {
         maybeInitTwoPaneController()
-        twoPaneController.showTranslationConfigDialog(translateDirectly)
+        //twoPaneController.showTranslationConfigDialog(translateDirectly)
+        TranslationConfigDlgFragment(ninjaWebView.url.orEmpty())
+            .show(supportFragmentManager, "TranslationConfigDialog")
     }
 
     private val preferenceChangeListener =
@@ -1514,7 +1531,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 }
 
                 ConfigManager.K_TOOLBAR_ICONS_FOR_LARGE,
-                ConfigManager.K_TOOLBAR_ICONS -> {
+                ConfigManager.K_TOOLBAR_ICONS,
+                -> {
                     composeToolbarViewController.updateIcons()
                 }
 
@@ -1568,8 +1586,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
                 ConfigManager.K_ENABLE_IMAGE_ADJUSTMENT -> ninjaWebView.reload()
 
-                ConfigManager.K_WHITE_BACKGROUND -> {
-                    if (config.whiteBackground) {
+                ConfigManager.K_WHITE_BACKGROUND_LIST -> {
+                    if (config.whiteBackground(ninjaWebView.url.orEmpty())) {
                         ninjaWebView.updateCssStyle()
                     } else {
                         ninjaWebView.reload()
@@ -1619,7 +1637,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                     ttsManager.setSpeechRate(config.ttsSpeedValue / 100f)
 
                 ConfigManager.K_CUSTOM_USER_AGENT,
-                ConfigManager.K_ENABLE_CUSTOM_USER_AGENT -> {
+                ConfigManager.K_ENABLE_CUSTOM_USER_AGENT,
+                -> {
                     ninjaWebView.updateUserAgentString()
                     ninjaWebView.reload()
                 }
@@ -1767,7 +1786,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         url: String = config.favoriteUrl,
         foreground: Boolean = true,
         incognito: Boolean = false,
-        enablePreloadWebView: Boolean = true
+        enablePreloadWebView: Boolean = true,
     ) {
         val newWebView = (preloadedWebView ?: createNinjaWebView()).apply {
             this.albumTitle = title
@@ -1787,7 +1806,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     private fun maybeCreateNewPreloadWebView(
         enablePreloadWebView: Boolean,
-        newWebView: NinjaWebView
+        newWebView: NinjaWebView,
     ) {
         preloadedWebView = null
         if (enablePreloadWebView) {
@@ -2039,7 +2058,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         composeToolbarViewController.hide()
 
         val textOrUrl = if (ninjaWebView.url?.startsWith("data:") != true) {
-            val url = ninjaWebView.url ?: ""
+            val url = ninjaWebView.url.orEmpty()
             TextFieldValue(url, selection = TextRange(0, url.length))
         } else {
             TextFieldValue("")
@@ -2067,7 +2086,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     private fun getClipboardText(): String =
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
-            .primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+            .primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
 
     private var isRunning = false
     private fun updateRefresh(running: Boolean) {
@@ -2278,7 +2297,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         }
 
     private fun confirmAdSiteAddition(url: String) {
-        val host = Uri.parse(url).host ?: ""
+        val host = Uri.parse(url).host.orEmpty()
         if (config.adSites.contains(host)) {
             confirmRemoveAdSite(host)
         } else {
@@ -2288,7 +2307,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                     "Ad domain to be blocked",
                     "",
                     host,
-                ).show() ?: ""
+                ).show().orEmpty()
 
                 if (domain.isNotBlank()) {
                     config.adSites = config.adSites.apply { add(domain) }
@@ -2339,7 +2358,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         contextMenuItemType: ContextMenuItemType,
         title: String,
         url: String,
-        imageUrl: String
+        imageUrl: String,
     ) {
         when (contextMenuItemType) {
             ContextMenuItemType.NewTabForeground -> addAlbum(title, url)
@@ -2412,7 +2431,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private fun translateImage(url: String) {
         lifecycleScope.launch {
             val base64String = translationViewModel.translateImage(
-                ninjaWebView.url ?: "",
+                ninjaWebView.url.orEmpty(),
                 url,
                 TranslationLanguage.KO,
                 config.translationLanguage,
@@ -2579,6 +2598,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     override fun showMenuDialog() =
         MenuDialogFragment(
+            ninjaWebView.url.orEmpty(),
             { menuActionHandler.handle(it, ninjaWebView) },
             { menuActionHandler.handleLongClick(it, ninjaWebView) }
         ).show(supportFragmentManager, "menu_dialog")

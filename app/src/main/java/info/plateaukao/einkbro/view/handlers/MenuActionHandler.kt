@@ -70,7 +70,7 @@ class MenuActionHandler(
 
         MenuItemType.CopyLink -> ShareUtil.copyToClipboard(
             activity,
-            BrowserUnit.stripUrlQuery(ninjaWebView.url ?: "")
+            BrowserUnit.stripUrlQuery(ninjaWebView.url.orEmpty())
         )
 
         MenuItemType.Shortcut -> browserController.createShortcut()
@@ -84,7 +84,7 @@ class MenuActionHandler(
 
         MenuItemType.FontSize -> browserController.showFontSizeChangeDialog()
         MenuItemType.InvertColor -> ninjaWebView.toggleInvertColor()
-        MenuItemType.WhiteBknd -> config::whiteBackground.toggle()
+        MenuItemType.WhiteBknd -> config.toggleWhiteBackground(ninjaWebView.url.orEmpty())
         MenuItemType.BoldFont -> config::boldFontStyle.toggle()
         MenuItemType.BlackFont -> config::blackFontStyle.toggle()
         MenuItemType.Search -> browserController.showSearchPanel()
