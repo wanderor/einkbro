@@ -5,9 +5,6 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
-import android.graphics.Paint
 import android.graphics.Point
 import android.net.Uri
 import android.os.Build
@@ -16,7 +13,6 @@ import android.print.PrintDocumentAdapter
 import android.util.Base64
 import android.view.KeyEvent
 import android.view.MotionEvent
-import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebSettings
@@ -123,8 +119,9 @@ open class NinjaWebView(
                     (if (fontType == FontType.SERIF) serifFontCss else "") +
                     (if (config.whiteBackground(url.orEmpty())) whiteBackgroundCss else "") +
                     (if (fontType == FontType.CUSTOM) getCustomFontCss() else "") +
-                    (if (config.boldFontStyle) boldFontCss else "") +
-                    // all css are purgsed by epublib. need to add it back if it's epub reader mode
+                    (if (config.boldFontStyle)
+                        boldFontCss.replace("value", "${config.fontBoldness}") else "") +
+                    // all css are purged by epublib. need to add it back if it's epub reader mode
                     if (isEpubReaderMode) String(
                         getByteArrayFromAsset("readerview.css"),
                         Charsets.UTF_8
@@ -572,6 +569,29 @@ open class NinjaWebView(
         }
     }
 
+    private fun simulateClick(point: Point) {
+        val downTime = SystemClock.uptimeMillis()
+        val downEvent =
+            MotionEvent.obtain(
+                downTime, downTime, KeyEvent.ACTION_DOWN,
+                point.x.toFloat(), point.y.toFloat(), 0
+            )
+        (this.parent as ViewGroup).dispatchTouchEvent(downEvent)
+
+        val upEvent =
+            MotionEvent.obtain(
+                downTime, downTime + 700, KeyEvent.ACTION_UP,
+                point.x.toFloat(), point.y.toFloat(), 0
+            )
+        postDelayed(
+            {
+                (this.parent as ViewGroup).dispatchTouchEvent(upEvent)
+                downEvent.recycle()
+                upEvent.recycle()
+            }, 50
+        )
+    }
+
     private fun simulateLongClick(point: Point) {
         isSelectingText = true
         val downTime = SystemClock.uptimeMillis()
@@ -926,9 +946,21 @@ open class NinjaWebView(
         }
     }
 
+    fun selectSentence(point: Point) {
+        evaluateJavascript(jsSelectSentence) {
+            this.postDelayed({ simulateClick(point) }, 100)
+        }
+    }
+
+    fun selectParagraph(point: Point) {
+        evaluateJavascript(jsSelectParagraph) {
+            this.postDelayed({ simulateClick(point) }, 100)
+        }
+    }
+
     suspend fun getSelectedTextWithContext(contextLength: Int = 10): String =
         suspendCoroutine { continuation ->
-            evaluateJavascript(jsGetSelectedTextWithContext) { value ->
+            evaluateJavascript(jsGetSelectedTextWithContextV2) { value ->
                 continuation.resume(value.substring(1, value.length - 1))
             }
         }
@@ -956,9 +988,90 @@ open class NinjaWebView(
     companion object {
         private const val FAKE_PRE_PROGRESS = 5
 
-        private const val jsGetSelectedTextWithContext = """
+        private const val jsSelectParagraph = """
+            javascript:(function () {
+    let selection = window.getSelection();
+    if (selection.rangeCount === 0) return;
+
+    let range = selection.getRangeAt(0);
+    let startContainer = range.startContainer;
+    let endContainer = range.endContainer;
+
+    // Check if the selection is within a single text node
+    if (startContainer !== endContainer || startContainer.nodeType !== Node.TEXT_NODE) {
+        return;
+    }
+
+    let textContent = startContainer.textContent;
+    let startOffset = range.startOffset;
+    let endOffset = range.endOffset;
+
+    let paragraphStart = startOffset;
+    let paragraphEnd = endOffset;
+
+    // Move the start of the range to the start of the paragraph (i.e., look for newline or start of the node)
+    while (paragraphStart > 0 && textContent[paragraphStart - 1] !== '\n') {
+        paragraphStart--;
+    }
+
+    // Move the end of the range to the end of the paragraph (i.e., look for newline or end of the node)
+    while (paragraphEnd < textContent.length && textContent[paragraphEnd] !== '\n') {
+        paragraphEnd++;
+    }
+
+    // Set the range to the paragraph boundaries
+    range.setStart(startContainer, paragraphStart);
+    range.setEnd(startContainer, paragraphEnd);
+
+    // Clear previous selection and set the new one
+    selection.removeAllRanges();
+    selection.addRange(range);
+})();
+        """
+        private const val jsSelectSentence = """
+            javascript:(function () {
+    let selection = window.getSelection();
+    if (selection.rangeCount === 0) return;
+
+    let range = selection.getRangeAt(0);
+    let startContainer = range.startContainer;
+    let endContainer = range.endContainer;
+
+    if (startContainer !== endContainer || startContainer.nodeType !== Node.TEXT_NODE) {
+        // Only handle cases where the selection is within a single text node
+        return;
+    }
+
+    let textContent = startContainer.textContent;
+    let startOffset = range.startOffset;
+    let endOffset = range.endOffset;
+
+    let sentenceStart = startOffset;
+    let sentenceEnd = endOffset;
+
+    // Move the start of the range to the start of the sentence
+    while (sentenceStart > 0 && ![".", "?", "。", "!"].includes(textContent[sentenceStart - 1])) {
+        sentenceStart--;
+    }
+
+    // Move the end of the range to the end of the sentence
+    while (sentenceEnd < textContent.length && ![".", "?", "。", "!"].includes(textContent[sentenceEnd])) {
+        sentenceEnd++;
+    }
+
+    // Set the range to the sentence boundaries
+    range.setStart(startContainer, sentenceStart);
+    range.setEnd(startContainer, sentenceEnd);
+
+    // Clear previous selection and set the new one
+    selection.removeAllRanges();
+    selection.addRange(range);
+            })();
+        """
+
+        private const val jsGetSelectedTextWithContextV2 = """
             javascript:(function() {
-    let contextLength = 50;
+    let contextLength = 120;
     let selection = window.getSelection();
     if (selection.rangeCount === 0) return "";
 
@@ -975,16 +1088,30 @@ open class NinjaWebView(
     let startOffset = range.startOffset;
     let endOffset = range.endOffset;
 
-    // Calculate the start and end positions for context
-    let contextStartPos = Math.max(0, startOffset - contextLength);
-    let contextEndPos = Math.min(textContent.length, endOffset + contextLength);
+    // Extend previousContext to the previous ".", "。", "?", or "!"
+    let contextStartPos = startOffset;
+    while (contextStartPos > 0 && ![".", "。", "?", "!"].includes(textContent[contextStartPos - 1])) {
+        contextStartPos--;
+        if (startOffset - contextStartPos > contextLength) {
+            break;
+        }
+    }
+
+    // Extend nextContext to the next ".", "?", or "。"
+    let contextEndPos = endOffset;
+    while (contextEndPos < textContent.length && ![".", "?", "。"].includes(textContent[contextEndPos])) {
+        contextEndPos++;
+        if (contextEndPos - endOffset > contextLength) {
+            break;
+        }
+    }
 
     let previousContext = textContent.substring(contextStartPos, startOffset);
-    let nextContext = textContent.substring(endOffset, contextEndPos);
+    let nextContext = textContent.substring(endOffset, contextEndPos+1);
 
-    selectedText =  selection.toString();
+    let selectedText = selection.toString();
     return previousContext + "<<" + selectedText + ">>" + nextContext;
-            })()
+})();
         """
 
         private const val secondPart =
@@ -1214,25 +1341,25 @@ input[type=button]: focus,input[type=submit]: focus,input[type=reset]: focus,inp
         """
 
         private const val boldFontCss = "* {\n" +
-                "\tfont-weight:700 !important;\n" +
+                "\tfont-weight:value !important;\n" +
                 "}\n" +
                 "a,a * {\n" +
-                "\tfont-weight:700 !important;\n" +
+                "\tfont-weight:value !important;\n" +
                 "}\n" +
                 "a: visited,a: visited *,a: active,a: active * {\n" +
-                "\tfont-weight:700 !important;\n" +
+                "\tfont-weight:value !important;\n" +
                 "}\n" +
                 "a: hover,a: hover * {\n" +
-                "\tfont-weight:700 !important;\n" +
+                "\tfont-weight:value !important;\n" +
                 "}\n" +
                 "input,select,option,button,textarea {\n" +
-                "\tfont-weight:700 !important;\n" +
+                "\tfont-weight:value !important;\n" +
                 "}\n" +
                 "input: focus,select: focus,option: focus,button: focus,textarea: focus,input: hover,select: hover,option: hover,button: hover,textarea: hover {\n" +
-                "\tfont-weight:700 !important;\n" +
+                "\tfont-weight:value !important;\n" +
                 "}\n" +
                 "input[type=button]: focus,input[type=submit]: focus,input[type=reset]: focus,input[type=image]: focus, input[type=button]: hover,input[type=submit]: hover,input[type=reset]: hover,input[type=image]: hover {\n" +
-                "\tfont-weight:700 !important;\n" +
+                "\tfont-weight:value !important;\n" +
                 "}\n"
 
         private const val textSelectionChangeJs = """
@@ -1470,28 +1597,8 @@ highlightSelection();
         initAlbum()
     }
 
-    private val invertPaint: Paint = Paint().apply {
-        val colorMatrix = ColorMatrix(
-            floatArrayOf(
-                -1f, 0f, 0f, 0f, 255f,
-                0f, -1f, 0f, 0f, 255f,
-                0f, 0f, -1f, 0f, 255f,
-                0f, 0f, 0f, 1f, 0f
-            )
-        )
-        colorFilter = ColorMatrixColorFilter(colorMatrix)
-    }
-
-    private var isInvertColor = false
-    fun toggleInvertColor(view: View = this) {
-        if (this == view) {
-            isInvertColor = !isInvertColor
-        }
-
-        if (isInvertColor) {
-            view.setLayerType(LAYER_TYPE_HARDWARE, invertPaint)
-        } else {
-            view.setLayerType(LAYER_TYPE_HARDWARE, null)
-        }
+    fun applyFontBoldness() {
+        val fontCss = boldFontCss.replace("value", config.fontBoldness.toString())
+        injectCss(fontCss.toByteArray())
     }
 }

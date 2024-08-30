@@ -1,5 +1,6 @@
 package info.plateaukao.einkbro.activity
 
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -66,6 +67,7 @@ import info.plateaukao.einkbro.setting.VersionSettingItem
 import info.plateaukao.einkbro.unit.BackupUnit
 import info.plateaukao.einkbro.unit.BrowserUnit
 import info.plateaukao.einkbro.unit.HelperUnit
+import info.plateaukao.einkbro.unit.LocaleManager
 import info.plateaukao.einkbro.view.GestureType
 import info.plateaukao.einkbro.view.NinjaToast
 import info.plateaukao.einkbro.view.compose.MyTheme
@@ -277,6 +279,15 @@ class SettingActivity : ComponentActivity(), KoinComponent {
         }
     }
 
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(
+            LocaleManager.setLocale(
+                newBase,
+                config.localeLanguage.languageCode
+            )
+        )
+    }
+
     private fun handleLink(url: String) {
         startActivity(
             Intent(this, BrowserActivity::class.java).apply {
@@ -424,6 +435,16 @@ class SettingActivity : ComponentActivity(), KoinComponent {
             R.string.setting_summary_clear_recent_bookmarks,
         ) {
             config.clearRecentBookmarks()
+        },
+        ActionSettingItem(
+            R.string.setting_app_locale,
+            R.drawable.icon_settings,
+            R.string.setting_summary_app_locale,
+        ) {
+            lifecycleScope.launch {
+                TranslationLanguageDialog(this@SettingActivity).showAppLocale()
+                config.restartChanged = true
+            }
         },
     )
 
@@ -791,7 +812,7 @@ class SettingActivity : ComponentActivity(), KoinComponent {
         ),
         ActionSettingItem(
             R.string.setting_dual_caption,
-            R.drawable.icon_arrow_up_gest,
+            R.drawable.ic_reselect,
             R.string.setting_summary_dual_caption,
         ) {
             lifecycleScope.launch {
@@ -815,6 +836,31 @@ class SettingActivity : ComponentActivity(), KoinComponent {
     )
 
     private val chatGptSettingItems = listOf(
+        ActionSettingItem(
+            R.string.setting_title_gpt_query_list,
+            R.drawable.icon_menu_save,
+            R.string.setting_summary_gpt_query_list,
+        ) {
+            startActivity(GptQueryListActivity.createIntent(this))
+        },
+        ActionSettingItem(
+            R.string.setting_title_gpt_action_list,
+            R.drawable.icon_list,
+            R.string.setting_summary_gpt_action_list,
+        ) { GptActionsActivity.start(this) },
+        BooleanSettingItem(
+            R.string.use_it_on_dict_search,
+            R.drawable.icon_search,
+            R.string.setting_summary_search_in_dict,
+            config::externalSearchWithGpt
+        ),
+        BooleanSettingItem(
+            R.string.setting_title_chat_stream,
+            R.drawable.ic_chat,
+            R.string.setting_summary_chat_stream,
+            config::enableOpenAiStream
+        ),
+        DividerSettingItem(),
         ValueSettingItem(
             R.string.setting_title_edit_gpt_api_key,
             R.drawable.ic_chat_gpt,
@@ -827,12 +873,12 @@ class SettingActivity : ComponentActivity(), KoinComponent {
             R.string.setting_summary_gpt_model_name,
             config::gptModel
         ),
-        DividerSettingItem(),
-        ActionSettingItem(
-            R.string.setting_title_gpt_action_list,
-            R.drawable.icon_list,
-            R.string.setting_summary_gpt_action_list,
-        ) { GptActionsActivity.start(this) },
+        BooleanSettingItem(
+            R.string.use_it_on_tts,
+            R.drawable.ic_tts,
+            R.string.setting_summary_use_gpt_for_tts,
+            config::useOpenAiTts
+        ),
         ValueSettingItem(
             R.string.setting_title_gpt_prompt_for_web_page,
             R.drawable.ic_chat_gpt,
@@ -841,69 +887,42 @@ class SettingActivity : ComponentActivity(), KoinComponent {
         ),
         DividerSettingItem(),
         BooleanSettingItem(
-            R.string.use_it_on_dict_search,
-            R.drawable.icon_search,
-            R.string.setting_summary_search_in_dict,
-            config::externalSearchWithGpt
-        ),
-        BooleanSettingItem(
-            R.string.use_it_on_tts,
-            R.drawable.ic_tts,
-            R.string.setting_summary_use_gpt_for_tts,
-            config::useOpenAiTts
-        ),
-        BooleanSettingItem(
-            R.string.setting_title_chat_stream,
-            R.drawable.ic_chat,
-            R.string.setting_summary_chat_stream,
-            config::enableOpenAiStream
-        ),
-        DividerSettingItem(),
-        BooleanSettingItem(
             R.string.setting_title_use_custom_gpt_url,
-            R.drawable.ic_chat,
+            R.drawable.ic_ollama,
             R.string.setting_summary_use_custom_gpt_url,
             config::useCustomGptUrl
         ),
         ValueSettingItem(
             R.string.setting_title_other_model_name,
-            R.drawable.ic_chat_gpt,
+            R.drawable.ic_ollama,
             R.string.setting_summary_other_model_name,
             config::alternativeModel
         ),
         ValueSettingItem(
             R.string.setting_title_custom_gpt_url,
-            R.drawable.ic_earth,
+            R.drawable.ic_ollama,
             R.string.setting_summary_custom_gpt_url,
             config::gptUrl
         ),
         DividerSettingItem(),
         BooleanSettingItem(
             R.string.setting_title_use_gemini,
-            R.drawable.ic_chat,
+            R.drawable.ic_gemini,
             R.string.setting_summary_use_gemini,
             config::useGeminiApi
         ),
         ValueSettingItem(
             R.string.setting_title_gemini_key,
-            R.drawable.ic_chat,
+            R.drawable.ic_gemini,
             R.string.setting_summary_gemini_key,
             config::geminiApiKey
         ),
         ValueSettingItem(
             R.string.setting_title_gemini_model_name,
-            R.drawable.ic_chat_gpt,
+            R.drawable.ic_gemini,
             R.string.setting_summary_gemini_model_name,
             config::geminiModel
         ),
-        DividerSettingItem(),
-        ActionSettingItem(
-            R.string.setting_title_gpt_query_list,
-            R.drawable.icon_menu_save,
-            R.string.setting_summary_gpt_query_list,
-        ) {
-            startActivity(GptQueryListActivity.createIntent(this))
-          },
     )
 
     private val startSettingItems = listOf(
@@ -1017,12 +1036,7 @@ class SettingActivity : ComponentActivity(), KoinComponent {
     )
 
     private fun handleBookmarkSync(forceUpload: Boolean) {
-        backupUnit.handleBookmarkSync(
-            forceUpload,
-            dialogManager,
-            createBookmarkFileLauncher,
-            openBookmarkFileLauncher
-        )
+        backupUnit.handleBookmarkSync(forceUpload)
     }
 
     private fun hideStatusBar() {

@@ -8,6 +8,7 @@ import android.app.PictureInPictureParams
 import android.app.SearchManager
 import android.content.BroadcastReceiver
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.Intent.ACTION_VIEW
 import android.content.IntentFilter
@@ -95,6 +96,7 @@ import info.plateaukao.einkbro.unit.BrowserUnit.createDownloadReceiver
 import info.plateaukao.einkbro.unit.HelperUnit
 import info.plateaukao.einkbro.unit.HelperUnit.toNormalScheme
 import info.plateaukao.einkbro.unit.IntentUnit
+import info.plateaukao.einkbro.unit.LocaleManager
 import info.plateaukao.einkbro.unit.ShareUtil
 import info.plateaukao.einkbro.unit.ViewUnit
 import info.plateaukao.einkbro.util.Constants.Companion.ACTION_DICT
@@ -115,6 +117,7 @@ import info.plateaukao.einkbro.view.dialog.compose.BookmarksDialogFragment
 import info.plateaukao.einkbro.view.dialog.compose.ContextMenuDialogFragment
 import info.plateaukao.einkbro.view.dialog.compose.ContextMenuItemType
 import info.plateaukao.einkbro.view.dialog.compose.FastToggleDialogFragment
+import info.plateaukao.einkbro.view.dialog.compose.FontBoldnessDialogFragment
 import info.plateaukao.einkbro.view.dialog.compose.FontDialogFragment
 import info.plateaukao.einkbro.view.dialog.compose.LanguageSettingDialogFragment
 import info.plateaukao.einkbro.view.dialog.compose.MenuDialogFragment
@@ -138,6 +141,8 @@ import info.plateaukao.einkbro.viewmodel.ActionModeMenuState.HighlightText
 import info.plateaukao.einkbro.viewmodel.ActionModeMenuState.Idle
 import info.plateaukao.einkbro.viewmodel.ActionModeMenuState.Naver
 import info.plateaukao.einkbro.viewmodel.ActionModeMenuState.Papago
+import info.plateaukao.einkbro.viewmodel.ActionModeMenuState.SelectParagraph
+import info.plateaukao.einkbro.viewmodel.ActionModeMenuState.SelectSentence
 import info.plateaukao.einkbro.viewmodel.ActionModeMenuState.SplitSearch
 import info.plateaukao.einkbro.viewmodel.ActionModeMenuState.Tts
 import info.plateaukao.einkbro.viewmodel.ActionModeMenuViewModel
@@ -468,7 +473,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private fun initActionModeViewModel() {
         lifecycleScope.launch {
             actionModeMenuViewModel.actionModeMenuState.collect { state ->
-                val point = actionModeMenuViewModel.clickedPoint.value
+                val anchorPoint = actionModeMenuViewModel.clickedPoint.value
                 when (state) {
                     is HighlightText -> {
                         lifecycleScope.launch {
@@ -493,7 +498,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                             TranslateDialogFragment(
                                 translationViewModel,
                                 externalSearchWebView,
-                                point
+                                anchorPoint
                             )
                                 .show(supportFragmentManager, "translateDialog")
                             actionModeMenuViewModel.finish()
@@ -501,13 +506,14 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                     }
 
                     is Gpt -> {
+                        val gptAction = config.gptActionList[state.gptActionIndex]
                         translationViewModel.viewModelScope.launch {
                             translationViewModel.updateInputMessage(actionModeMenuViewModel.selectedText.value)
                             val selectedTextWithContext = ninjaWebView.getSelectedTextWithContext()
                             translationViewModel.updateMessageWithContext(selectedTextWithContext)
                             if (translationViewModel.hasOpenAiApiKey()) {
                                 translationViewModel.updateTranslateMethod(TRANSLATE_API.GPT)
-                                translationViewModel.gptActionInfo = state.gptAction
+                                translationViewModel.gptActionInfo = gptAction
                                 translationViewModel.url = ninjaWebView.url.orEmpty()
                                 TranslateDialogFragment(
                                     translationViewModel,
@@ -535,6 +541,9 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                         actionModeMenuViewModel.finish()
                     }
 
+                    is SelectSentence -> ninjaWebView.selectSentence(longPressPoint)
+                    is SelectParagraph -> ninjaWebView.selectParagraph(longPressPoint)
+
                     Idle -> Unit
                 }
             }
@@ -554,6 +563,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             bookmarkManager.getArticleByUrl(url) ?: bookmarkManager.insertArticle(article)
 
         val selectedText = actionModeMenuViewModel.selectedText.value
+            .replace("\\\"", "\"")
         val highlight = Highlight(articleInDb.id, selectedText)
         bookmarkManager.insertHighlight(highlight)
     }
@@ -642,6 +652,16 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     override fun toggleTouchPagination() = toggleTouchTurnPageFeature()
 
+    override fun showFontBoldnessDialog() {
+        FontBoldnessDialogFragment(
+            config.fontBoldness,
+            okAction = { changedBoldness ->
+                config.fontBoldness = changedBoldness
+                ninjaWebView.applyFontBoldness()
+            }
+        ).show(supportFragmentManager, "FontBoldnessDialog")
+    }
+
     override fun toggleTextSearch() {
         remoteConnViewModel.toggleTextSearch()
     }
@@ -696,6 +716,12 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             actionModeMenuViewModel.hide()
         }
         actionModeMenuViewModel.updateClickedPoint(newPoint)
+
+        // update the long press point so that it can be used for selecting sentence
+        longPressPoint = Point(
+            ViewUnit.dpToPixel(this, left.toInt() - 1).toInt(),
+            ViewUnit.dpToPixel(this, top.toInt() + 1).toInt()
+        )
     }
 
     override fun toggleReceiveTextSearch() {
@@ -1515,9 +1541,32 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     override fun showTranslationConfigDialog(translateDirectly: Boolean) {
         maybeInitTwoPaneController()
         //twoPaneController.showTranslationConfigDialog(translateDirectly)
-        TranslationConfigDlgFragment(ninjaWebView.url.orEmpty())
+        TranslationConfigDlgFragment(ninjaWebView.url.orEmpty()) { shouldTranslate ->
+            if (shouldTranslate) {
+                translate(config.translationMode)
+            } else {
+                ninjaWebView.reload()
+            }
+        }
             .show(supportFragmentManager, "TranslationConfigDialog")
     }
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(
+            LocaleManager.setLocale(
+                newBase,
+                config.localeLanguage.languageCode
+            )
+        )
+    }
+
+    private fun updateLocale(context: Context, languageCode: String) {
+        val newContext = LocaleManager.setLocale(context, languageCode)
+        val intent = Intent(newContext, BrowserActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        context.startActivity(intent)
+    }
+
 
     private val preferenceChangeListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -1585,14 +1634,6 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 }
 
                 ConfigManager.K_ENABLE_IMAGE_ADJUSTMENT -> ninjaWebView.reload()
-
-                ConfigManager.K_WHITE_BACKGROUND_LIST -> {
-                    if (config.whiteBackground(ninjaWebView.url.orEmpty())) {
-                        ninjaWebView.updateCssStyle()
-                    } else {
-                        ninjaWebView.reload()
-                    }
-                }
 
                 ConfigManager.K_CUSTOM_FONT -> {
                     if (config.fontType == FontType.CUSTOM) {
@@ -1720,12 +1761,17 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             gotoUrlAction = { url -> updateAlbum(url) },
             addTabAction = { title, url, isForeground -> addAlbum(title, url, isForeground) },
             splitScreenAction = { url -> toggleSplitScreen(url) },
-            syncBookmarksAction = this::handleBookmarkSync
+            syncBookmarksAction = this::handleBookmarkSync,
+            linkBookmarksAction = this::linkBookmarkSync
         ).show(supportFragmentManager, "bookmarks dialog")
 
     private fun handleBookmarkSync(forceUpload: Boolean = false) {
-        backupUnit.handleBookmarkSync(
-            forceUpload,
+        if (config.bookmarkSyncUrl.isNotEmpty()) backupUnit.handleBookmarkSync(forceUpload)
+        else linkBookmarkSync()
+    }
+
+    private fun linkBookmarkSync() {
+        backupUnit.linkBookmarkSync(
             dialogManager,
             createBookmarkFileLauncher,
             openBookmarkFileLauncher
@@ -2129,7 +2175,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             )
 
         }
-        ninjaWebView.toggleInvertColor(view!!)
+        ViewUnit.invertColor(view, config.hasInvertedColor(ninjaWebView.url.orEmpty()))
 
         val decorView = window.decorView as FrameLayout
         decorView.addView(
@@ -2328,13 +2374,13 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     }
 
     private var motionEvent: MotionEvent? = null
-    private var point: Point = Point(0, 0)
+    private var longPressPoint: Point = Point(0, 0)
     override fun onLongPress(message: Message, event: MotionEvent?) {
         //Log.d("touch", "onLongPress")
         if (ninjaWebView.isSelectingText) return
 
         motionEvent = event
-        point = Point(event?.x?.toInt() ?: 0, event?.y?.toInt() ?: 0)
+        longPressPoint = Point(event?.x?.toInt() ?: 0, event?.y?.toInt() ?: 0)
         val url = BrowserUnit.getWebViewLinkUrl(ninjaWebView, message)
         if (url.isBlank()) {
         } else {
@@ -2375,7 +2421,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
             ContextMenuItemType.SelectText -> ninjaWebView.post {
                 //actionModeMenuViewModel.updateClickedPoint(motionEvent!!.toPoint())
-                ninjaWebView.selectLinkText(point)
+                ninjaWebView.selectLinkText(longPressPoint)
             }
 
             ContextMenuItemType.OpenWith -> HelperUnit.showBrowserChooser(
@@ -2600,7 +2646,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         MenuDialogFragment(
             ninjaWebView.url.orEmpty(),
             { menuActionHandler.handle(it, ninjaWebView) },
-            { menuActionHandler.handleLongClick(it, ninjaWebView) }
+            { menuActionHandler.handleLongClick(it) }
         ).show(supportFragmentManager, "menu_dialog")
 
     override fun showWebArchiveFilePicker() {
@@ -2716,7 +2762,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                     actionModeMenuViewModel.updateSelectedText(ninjaWebView.getSelectedText())
                     actionModeMenuViewModel.showActionModeView(
                         this@BrowserActivity,
-                        binding.root
+                        binding.root,
+                        translationViewModel,
                     ) {
                         ninjaWebView.removeTextSelection()
                     }
@@ -2753,7 +2800,6 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     }
 
     override fun onActionModeFinished(mode: ActionMode?) {
-        //Log.d("touch", "onActionModeFinished")
         super.onActionModeFinished(mode)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             mode?.hide(1000000)

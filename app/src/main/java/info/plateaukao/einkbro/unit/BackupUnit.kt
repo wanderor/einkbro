@@ -275,24 +275,23 @@ class BackupUnit(
 
     fun handleBookmarkSync(
         forceUpload: Boolean = false,
+    ) {
+        if (forceUpload) {
+            exportBookmarks(Uri.parse(config.bookmarkSyncUrl), false)
+        } else {
+            importBookmarks(Uri.parse(config.bookmarkSyncUrl))
+        }
+    }
+
+    fun linkBookmarkSync(
         dialogManager: DialogManager,
         createBookmarkFileLauncher: ActivityResultLauncher<Intent>,
         openBookmarkFileLauncher: ActivityResultLauncher<Intent>,
     ) {
-        if (forceUpload) {
-            if (config.bookmarkSyncUrl.isNotBlank()) {
-                exportBookmarks(Uri.parse(config.bookmarkSyncUrl), false)
-            }
-        } else {
-            if (config.bookmarkSyncUrl.isNotBlank()) {
-                importBookmarks(Uri.parse(config.bookmarkSyncUrl))
-            } else {
-                dialogManager.showCreateOrOpenBookmarkFileDialog(
-                    { BrowserUnit.createBookmarkFilePicker(createBookmarkFileLauncher) },
-                    { BrowserUnit.openBookmarkFilePicker(openBookmarkFileLauncher) }
-                )
-            }
-        }
+        dialogManager.showCreateOrOpenBookmarkFileDialog(
+            { BrowserUnit.createBookmarkFilePicker(createBookmarkFileLauncher) },
+            { BrowserUnit.openBookmarkFilePicker(openBookmarkFileLauncher) }
+        )
     }
 
     private fun linkToBookmarkSyncFile(result: ActivityResult) {
@@ -315,7 +314,7 @@ class BackupUnit(
         return uri
     }
 
-    fun exportHighlights(uri: Uri, data: String) {
+    fun exportDataToFileUri(uri: Uri, data: String) {
         val fileContent = data.toByteArray()
 
         context.contentResolver.openOutputStream(uri)?.use { outputStream ->

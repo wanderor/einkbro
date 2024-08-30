@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 
 <resources>
-
-
     <!-- App -->
     <string name="app_name">EinkBro</string>
     <string name="list_empty">Current list is empty.</string>
@@ -424,7 +422,7 @@
     <string name="setting_title_sync_bookmarks">Sync bookmarks</string>
     <string name="setting_title_setup_bookmarks_location">Configure bookmark location</string>
     <string name="setting_summary_setup_bookmarks_location">Select a file in Google Drive or other file location that supports remote sync.</string>
-    <string name="dialog_message_sync_bookmark_file">"To sync bookmarks, you need to use system file picker to create or open a bookmark file from Google Drive or a file that is synced with other remote service."</string>
+    <string name="dialog_message_sync_bookmark_file">To sync bookmarks, you need to use system file picker to create or open a bookmark file from Google Drive or a file that is synced with other remote service.</string>
     <string name="dialog_title_bookmark_sync">Bookmark File Setting</string>
     <string name="settings_title_back_key_behavior">Back key behavior</string>
     <string name="settings_summary_back_key_behavior">Close tab when it\'s already in the first page in history.</string>
@@ -436,7 +434,7 @@
     <string name="content_adjustment">Content Adjustment</string>
     <string name="share_save"><![CDATA[Share & Save]]></string>
     <string name="menu_gpt">ChatGPT</string>
-    <string name="setting_title_chat_gpt">ChatGPT Integration</string>
+    <string name="setting_title_chat_gpt">GPT Settings</string>
     <string name="setting_title_edit_gpt_api_key">OpenAI Key</string>
     <string name="setting_summary_edit_gpt_api_key">Input key in order to use this feature.</string>
     <string name="setting_title_edit_gpt_system_prompt">ChatGPT System Prompt</string>
@@ -463,8 +461,8 @@
     <string name="translate_image_key_summary">Input necessary key to use image translate feature.</string>
     <string name="papago_language_setting">Language Setting</string>
     <string name="toggle_touch_turn_page">Toggle Touch turn page</string>
-    <string name="use_it_on_dict_search">Use it in dictionary search</string>
-    <string name="setting_summary_search_in_dict">When searching in readers, use ChatGPT to search results.</string>
+    <string name="use_it_on_dict_search">Use GPT in dictionary search</string>
+    <string name="setting_summary_search_in_dict">When searching in readers, use GPT to search results.</string>
     <string name="menu_expand_menu">Show more</string>
     <string name="hide_statusbar">Hide statusbar</string>
     <string name="setting_summary_hide_statusbar">Always hide statusbar</string>
@@ -475,7 +473,7 @@
     <string name="setting_dual_caption">Dual Caption for Youtube</string>
     <string name="setting_summary_dual_caption">Select language for second caption</string>
     <string name="naver_translate">Naver Translate</string>
-    <string name="setting_title_gpt_model_name">ChatGPT Model Name</string>
+    <string name="setting_title_gpt_model_name">OpenAI Model Name</string>
     <string name="setting_summary_gpt_model_name">Default is gpt-3.5-turbo. Fill other model name if necessary.</string>
     <string name="split_search">Split Search</string>
     <string name="papago_translate_by_screen">Papago by Screen</string>
@@ -549,4 +547,9 @@
     <string name="setting_summary_gpt_query_list">Saved Gpt query results</string>
     <string name="enable_touch_area_as_page_key">As Page Up/Down key</string>
     <string name="translate_this_site">Translate this site</string>
+    <string name="select_sentence">Select Sentence</string>
+    <string name="select_paragraph">Select Paragraph</string>
+    <string name="toast_saved">Saved!</string>
+    <string name="setting_app_locale">UI Language</string>
+    <string name="setting_summary_app_locale">configure the language for interface</string>
 </resources>

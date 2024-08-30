@@ -258,21 +258,38 @@ class TranslationViewModel : ViewModel(), KoinComponent {
         _showEditDialogWithIndex.value = -1
     }
 
-    fun saveTranslationResult() {
-        viewModelScope.launch {
-            val (_, selectedText) = getSelectedTextAndPromptPrefix()
+    suspend fun saveTranslationResult() {
+        if (_translateMethod.value != TRANSLATE_API.GPT) {
             bookmarkManager.addChatGptQuery(
                 ChatGptQuery(
                     date = System.currentTimeMillis(),
                     url = url,
-                    model = gptActionInfo.model,
+                    model = _translateMethod.value.name,
+                    selectedText = _inputMessage.value,
+                    result = _responseMessage.value.text,
+                )
+            )
+        } else {
+            val (_, selectedText) = getSelectedTextAndPromptPrefix()
+            val model = gptActionInfo.model.ifEmpty {
+                when (gptActionInfo.actionType) {
+                    GptActionType.OpenAi -> config.gptModel
+                    GptActionType.Gemini -> config.geminiModel
+                    GptActionType.SelfHosted -> config.alternativeModel
+                    GptActionType.Default -> config.getDefaultActionModel()
+                }
+            }
+            bookmarkManager.addChatGptQuery(
+                ChatGptQuery(
+                    date = System.currentTimeMillis(),
+                    url = url,
+                    model = "${gptActionInfo.name} $model",
                     selectedText = selectedText,
                     result = toBeSavedResponseString,
                 )
             )
-            toBeSavedResponseString = ""
-            _responseMessage.value = AnnotatedString("Saved.")
         }
+        toBeSavedResponseString = ""
     }
 
 

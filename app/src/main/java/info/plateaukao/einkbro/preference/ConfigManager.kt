@@ -10,6 +10,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.content.edit
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.database.Bookmark
+import info.plateaukao.einkbro.database.BookmarkManager
+import info.plateaukao.einkbro.database.DomainConfigurationData
 import info.plateaukao.einkbro.epub.EpubFileInfo
 import info.plateaukao.einkbro.unit.ViewUnit
 import info.plateaukao.einkbro.util.Constants
@@ -22,6 +24,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.Json.Default.decodeFromString
 import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import java.util.Locale
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KMutableProperty0
@@ -31,6 +34,7 @@ class ConfigManager(
     private val context: Context,
     private val sp: SharedPreferences,
 ) : KoinComponent {
+    private val bookmarkManager: BookmarkManager by inject()
 
     fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
         sp.registerOnSharedPreferenceChangeListener(listener)
@@ -172,6 +176,8 @@ class ConfigManager(
 
     var touchAreaCustomizeY by IntPreference(sp, K_TOUCH_AREA_OFFSET, 0)
 
+    var fontBoldness by IntPreference(sp, K_FONT_BOLDNESS, 700)
+
     var customUserAgent by StringPreference(sp, K_CUSTOM_USER_AGENT)
     val customProcessTextUrl by StringPreference(sp, K_CUSTOM_PROCESS_TEXT_URL)
     var preferredTranslateLanguageString by StringPreference(sp, K_TRANSLATED_LANGS)
@@ -258,6 +264,15 @@ class ConfigManager(
             sp.edit { putInt("pdf_paper_size", value.ordinal) }
         }
 
+    var localeLanguage: TranslationLanguage
+        get() = TranslationLanguage.entries[sp.getInt(
+            "sp_locale_language",
+            getDefaultTranslationLanguage().ordinal
+        )]
+        set(value) {
+            sp.edit { putInt("sp_locale_language", value.ordinal) }
+        }
+
     var translationLanguage: TranslationLanguage
         get() = TranslationLanguage.entries[sp.getInt(
             K_TRANSLATE_LANGUAGE,
@@ -287,59 +302,92 @@ class ConfigManager(
 
     var favoriteUrl by StringPreference(sp, K_FAVORITE_URL, Constants.DEFAULT_HOME_URL)
 
+    var version by StringPreference(sp, "sp_version", "11.14.0")
+
     //use string set in sharedpreference
+    var domainConfigurationMap = mutableMapOf<String, DomainConfigurationData>()
+
     var scrollFixList: List<String>
         get() = sp.getStringSet(K_SCROLL_FIX_LIST, mutableSetOf())?.toList() ?: emptyList()
         set(value) = sp.edit { putStringSet(K_SCROLL_FIX_LIST, value.toSet()) }
 
-    fun shouldFixScroll(url: String): Boolean = scrollFixList.contains(Uri.parse(url).host)
-    fun toggleFixScroll(url: String): Boolean = Uri.parse(url)?.host?.let { host ->
-        scrollFixList = scrollFixList.toMutableList().apply {
-            if (scrollFixList.contains(host)) remove(host) else add(host)
-        }
-        shouldFixScroll(url)
-    } ?: false
+    fun shouldFixScroll(url: String): Boolean =
+        Uri.parse(url)?.host?.let { domainConfigurationMap[it]?.shouldFixScroll } ?: false
+
+    fun toggleFixScroll(url: String): Boolean {
+        val host = Uri.parse(url)?.host ?: return false
+
+        val config = domainConfigurationMap.getOrPut(host) { DomainConfigurationData(host) }
+        config.shouldFixScroll = !config.shouldFixScroll
+        bookmarkManager.addDomainConfiguration(config)
+
+        return shouldFixScroll(url)
+    }
 
     // use string set to store the list of sending page navigation key
-    private var sendPageNavKeyList: List<String>
+    var sendPageNavKeyList: List<String>
         get() = sp.getStringSet(K_SEND_PAGE_NAV_KEY_LIST, mutableSetOf())?.toList() ?: emptyList()
         set(value) = sp.edit { putStringSet(K_SEND_PAGE_NAV_KEY_LIST, value.toSet()) }
 
-    fun shouldSendPageNavKey(url: String): Boolean =
-        sendPageNavKeyList.contains(Uri.parse(url).host)
+    fun shouldSendPageNavKey(url: String): Boolean {
+        return Uri.parse(url)?.host?.let { domainConfigurationMap[it]?.shouldSendPageNavKey }
+            ?: false
+    }
 
-    fun toggleSendPageNavKey(url: String): Boolean = Uri.parse(url)?.host?.let { host ->
-        sendPageNavKeyList = sendPageNavKeyList.toMutableList().apply {
-            if (sendPageNavKeyList.contains(host)) remove(host) else add(host)
-        }
-        shouldSendPageNavKey(url)
-    } ?: false
+    fun toggleSendPageNavKey(url: String): Boolean {
+        val host = Uri.parse(url)?.host ?: return false
 
-    private var translateSiteList: List<String>
+        val config = domainConfigurationMap.getOrPut(host) { DomainConfigurationData(host) }
+        config.shouldSendPageNavKey = !config.shouldSendPageNavKey
+        bookmarkManager.addDomainConfiguration(config)
+
+        return shouldFixScroll(url)
+    }
+
+    var translateSiteList: List<String>
         get() = sp.getStringSet(K_TRANSLATE_SITE_LIST, mutableSetOf())?.toList() ?: emptyList()
         set(value) = sp.edit { putStringSet(K_TRANSLATE_SITE_LIST, value.toSet()) }
 
-    fun shouldTranslateSite(url: String): Boolean = translateSiteList.contains(Uri.parse(url).host)
+    fun shouldTranslateSite(url: String): Boolean =
+        Uri.parse(url)?.host?.let { domainConfigurationMap[it]?.shouldTranslateSite } ?: false
 
-    fun toggleTranslateSite(url: String): Boolean = Uri.parse(url)?.host?.let { host ->
-        translateSiteList = translateSiteList.toMutableList().apply {
-            if (translateSiteList.contains(host)) remove(host) else add(host)
-        }
-        shouldTranslateSite(url)
-    } ?: false
+    fun toggleTranslateSite(url: String): Boolean {
+        val host = Uri.parse(url)?.host ?: return false
+
+        val config = domainConfigurationMap.getOrPut(host) { DomainConfigurationData(host) }
+        config.shouldTranslateSite = !config.shouldTranslateSite
+        bookmarkManager.addDomainConfiguration(config)
+
+        return shouldTranslateSite(url)
+    }
 
     // use string set to store the url list of having white background
-    private var whiteBackgroundList: List<String>
+    var whiteBackgroundList: List<String>
         get() = sp.getStringSet(K_WHITE_BACKGROUND_LIST, mutableSetOf())?.toList() ?: emptyList()
         set(value) = sp.edit { putStringSet(K_WHITE_BACKGROUND_LIST, value.toSet()) }
 
-    fun whiteBackground(url: String): Boolean = whiteBackgroundList.contains(Uri.parse(url).host)
-    fun toggleWhiteBackground(url: String): Boolean = Uri.parse(url)?.host?.let { host ->
-        whiteBackgroundList = whiteBackgroundList.toMutableList().apply {
-            if (whiteBackgroundList.contains(host)) remove(host) else add(host)
-        }
-        whiteBackground(url)
-    } ?: false
+    fun whiteBackground(url: String): Boolean =
+        Uri.parse(url)?.host?.let { domainConfigurationMap[it]?.shouldUseWhiteBackground } ?: false
+
+    fun toggleWhiteBackground(url: String): Boolean {
+        val host = Uri.parse(url)?.host ?: return false
+
+        val config = domainConfigurationMap.getOrPut(host) { DomainConfigurationData(host) }
+        config.shouldUseWhiteBackground = !config.shouldUseWhiteBackground
+        bookmarkManager.addDomainConfiguration(config)
+        return whiteBackground(url)
+    }
+
+    fun hasInvertedColor(url: String): Boolean =
+        Uri.parse(url)?.host?.let { domainConfigurationMap[it]?.shouldInvertColor } ?: false
+    fun toggleInvertedColor(url: String): Boolean {
+        val host = Uri.parse(url)?.host ?: return false
+
+        val config = domainConfigurationMap.getOrPut(host) { DomainConfigurationData(host) }
+        config.shouldInvertColor = !config.shouldInvertColor
+        bookmarkManager.addDomainConfiguration(config)
+        return hasInvertedColor(url)
+    }
 
     var toolbarActions: List<ToolbarAction>
         get() {
@@ -606,6 +654,30 @@ class ConfigManager(
             }
         }
 
+    fun getDefaultActionModel(): String = if (useGeminiApi) {
+        geminiModel
+    } else if (useCustomGptUrl) {
+        alternativeModel
+    } else {
+        gptModel
+    }
+
+    fun getDefaultActionType(): GptActionType = if (useGeminiApi) {
+        GptActionType.Gemini
+    } else if (useCustomGptUrl) {
+        GptActionType.SelfHosted
+    } else {
+        GptActionType.OpenAi
+    }
+
+    fun getGptTypeModelMap(): Map<GptActionType, String> = mapOf(
+        GptActionType.Default to getDefaultActionModel(),
+        GptActionType.OpenAi to gptModel,
+        GptActionType.SelfHosted to alternativeModel,
+        GptActionType.Gemini to geminiModel
+    )
+
+
     var gptActionForExternalSearch: ChatGPTActionInfo?
         get() {
             val str = sp.getString(K_GPT_ACTION_EXTERNAL, "").orEmpty()
@@ -703,6 +775,7 @@ class ConfigManager(
         const val K_TWO_PANE_LINK_HERE = "sp_two_pane_link_here"
         const val K_DARK_MODE = "sp_dark_mode"
         const val K_TOUCH_AREA_OFFSET = "sp_touch_area_offset"
+        const val K_FONT_BOLDNESS = "sp_font_boldness"
         const val K_TOUCH_AREA_ACTION_SWITCH = "sp_touch_area_action_switch"
         const val K_TOUCH_AREA_ARROW_KEY = "sp_touch_area_arrow_key"
         const val K_TOUCH_AREA_HIDE_WHEN_INPUT = "sp_touch_area_hide_when_input"

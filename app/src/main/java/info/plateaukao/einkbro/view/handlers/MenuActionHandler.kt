@@ -15,6 +15,7 @@ import info.plateaukao.einkbro.unit.BrowserUnit
 import info.plateaukao.einkbro.unit.HelperUnit
 import info.plateaukao.einkbro.unit.IntentUnit
 import info.plateaukao.einkbro.unit.ShareUtil
+import info.plateaukao.einkbro.unit.ViewUnit
 import info.plateaukao.einkbro.view.NinjaToast
 import info.plateaukao.einkbro.view.NinjaWebView
 import info.plateaukao.einkbro.view.dialog.DialogManager
@@ -31,68 +32,79 @@ class MenuActionHandler(
     private val browserController = activity as BrowserController
     private val dialogManager by lazy { DialogManager(activity) }
 
-    fun handleLongClick(menuItemType: MenuItemType, ninjaWebView: NinjaWebView) = when (menuItemType) {
-        MenuItemType.Translate -> browserController.showTranslationConfigDialog(true)
-        MenuItemType.ReceiveData -> browserController.toggleReceiveTextSearch()
-        MenuItemType.SendLink -> browserController.toggleTextSearch()
-        MenuItemType.TouchSetting -> browserController.toggleTouchPagination()
-        else -> Unit
-    }
+    fun handleLongClick(menuItemType: MenuItemType) =
+        when (menuItemType) {
+            MenuItemType.Translate -> browserController.showTranslationConfigDialog(true)
+            MenuItemType.ReceiveData -> browserController.toggleReceiveTextSearch()
+            MenuItemType.SendLink -> browserController.toggleTextSearch()
+            MenuItemType.TouchSetting -> browserController.toggleTouchPagination()
+            MenuItemType.BoldFont -> browserController.showFontBoldnessDialog()
+            else -> Unit
+        }
 
-    fun handle(menuItemType: MenuItemType, ninjaWebView: NinjaWebView) = when (menuItemType) {
-        MenuItemType.Tts -> browserController.toggleTtsRead()
-        MenuItemType.QuickToggle -> browserController.showFastToggleDialog()
-        MenuItemType.OpenHome -> browserController.updateAlbum(config.favoriteUrl)
-        MenuItemType.CloseTab -> browserController.removeAlbum()
-        MenuItemType.Quit -> activity.finishAndRemoveTask()
+    fun handle(menuItemType: MenuItemType, ninjaWebView: NinjaWebView): Any? {
+        return when (menuItemType) {
+            MenuItemType.Tts -> browserController.toggleTtsRead()
+            MenuItemType.QuickToggle -> browserController.showFastToggleDialog()
+            MenuItemType.OpenHome -> browserController.updateAlbum(config.favoriteUrl)
+            MenuItemType.CloseTab -> browserController.removeAlbum()
+            MenuItemType.Quit -> activity.finishAndRemoveTask()
 
-        MenuItemType.SplitScreen -> browserController.toggleSplitScreen()
-        MenuItemType.Translate -> browserController.showTranslation()
-        MenuItemType.VerticalRead -> browserController.toggleVerticalRead()
-        MenuItemType.ReaderMode -> browserController.toggleReaderMode()
-        MenuItemType.TouchSetting -> browserController.showTouchAreaDialog()
-        MenuItemType.ToolbarSetting -> ToolbarConfigDialogFragment().show(
-            activity.supportFragmentManager,
-            "toolbar_config"
-        )
+            MenuItemType.SplitScreen -> browserController.toggleSplitScreen()
+            MenuItemType.Translate -> browserController.showTranslation()
+            MenuItemType.VerticalRead -> browserController.toggleVerticalRead()
+            MenuItemType.ReaderMode -> browserController.toggleReaderMode()
+            MenuItemType.TouchSetting -> browserController.showTouchAreaDialog()
+            MenuItemType.ToolbarSetting -> ToolbarConfigDialogFragment().show(
+                activity.supportFragmentManager,
+                "toolbar_config"
+            )
 
-        MenuItemType.ReceiveData -> browserController.toggleReceiveLink()
-        MenuItemType.SendLink -> browserController.sendToRemote(ninjaWebView.url.orEmpty())
+            MenuItemType.ReceiveData -> browserController.toggleReceiveLink()
+            MenuItemType.SendLink -> browserController.sendToRemote(ninjaWebView.url.orEmpty())
 
-        MenuItemType.ShareLink ->
-            IntentUnit.share(activity, ninjaWebView.title, ninjaWebView.url)
+            MenuItemType.ShareLink ->
+                IntentUnit.share(activity, ninjaWebView.title, ninjaWebView.url)
 
-        MenuItemType.OpenWith -> HelperUnit.showBrowserChooser(
-            activity,
-            ninjaWebView.url,
-            activity.getString(R.string.menu_open_with)
-        )
+            MenuItemType.OpenWith -> HelperUnit.showBrowserChooser(
+                activity,
+                ninjaWebView.url,
+                activity.getString(R.string.menu_open_with)
+            )
 
-        MenuItemType.CopyLink -> ShareUtil.copyToClipboard(
-            activity,
-            BrowserUnit.stripUrlQuery(ninjaWebView.url.orEmpty())
-        )
+            MenuItemType.CopyLink -> ShareUtil.copyToClipboard(
+                activity,
+                BrowserUnit.stripUrlQuery(ninjaWebView.url.orEmpty())
+            )
 
-        MenuItemType.Shortcut -> browserController.createShortcut()
+            MenuItemType.Shortcut -> browserController.createShortcut()
 
-        MenuItemType.Highlights -> IntentUnit.gotoHighlights(activity)
-        MenuItemType.SetHome -> config.favoriteUrl = ninjaWebView.url.orEmpty()
-        MenuItemType.SaveBookmark -> browserController.saveBookmark()
-        MenuItemType.OpenEpub -> openSavedEpub()
-        MenuItemType.SaveEpub -> browserController.showSaveEpubDialog()
-        MenuItemType.SavePdf -> printPDF(ninjaWebView)
+            MenuItemType.Highlights -> IntentUnit.gotoHighlights(activity)
+            MenuItemType.SetHome -> config.favoriteUrl = ninjaWebView.url.orEmpty()
+            MenuItemType.SaveBookmark -> browserController.saveBookmark()
+            MenuItemType.OpenEpub -> openSavedEpub()
+            MenuItemType.SaveEpub -> browserController.showSaveEpubDialog()
+            MenuItemType.SavePdf -> printPDF(ninjaWebView)
 
-        MenuItemType.FontSize -> browserController.showFontSizeChangeDialog()
-        MenuItemType.InvertColor -> ninjaWebView.toggleInvertColor()
-        MenuItemType.WhiteBknd -> config.toggleWhiteBackground(ninjaWebView.url.orEmpty())
-        MenuItemType.BoldFont -> config::boldFontStyle.toggle()
-        MenuItemType.BlackFont -> config::blackFontStyle.toggle()
-        MenuItemType.Search -> browserController.showSearchPanel()
-        MenuItemType.Download -> BrowserUnit.openDownloadFolder(activity)
-        MenuItemType.SaveArchive -> browserController.showWebArchiveFilePicker()
-        MenuItemType.Settings -> IntentUnit.gotoSettings(activity)
+            MenuItemType.FontSize -> browserController.showFontSizeChangeDialog()
+            MenuItemType.InvertColor -> {
+                val hasInvertedColor = config.toggleInvertedColor(ninjaWebView.url.orEmpty())
+                ViewUnit.invertColor(ninjaWebView, hasInvertedColor)
+            }
+            MenuItemType.WhiteBknd -> {
+                val isOn = config.toggleWhiteBackground(ninjaWebView.url.orEmpty())
+                if (isOn) ninjaWebView.updateCssStyle() else ninjaWebView.reload()
+            }
 
-        MenuItemType.AddToPocket -> ninjaWebView.url?.let { browserController.addToPocket(it) }
+            MenuItemType.BoldFont -> config::boldFontStyle.toggle()
+            MenuItemType.BlackFont -> config::blackFontStyle.toggle()
+            MenuItemType.Search -> browserController.showSearchPanel()
+            MenuItemType.Download -> BrowserUnit.openDownloadFolder(activity)
+            MenuItemType.SaveArchive -> browserController.showWebArchiveFilePicker()
+            MenuItemType.Settings -> IntentUnit.gotoSettings(activity)
+
+            MenuItemType.AddToPocket -> ninjaWebView.url?.let { browserController.addToPocket(it) }
+        }
     }
 
 

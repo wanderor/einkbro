@@ -14,8 +14,8 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import info.plateaukao.einkbro.R
-import info.plateaukao.einkbro.preference.ChatGPTActionInfo
 import info.plateaukao.einkbro.preference.ConfigManager
+import info.plateaukao.einkbro.preference.GptActionType
 import info.plateaukao.einkbro.preference.HighlightStyle
 import info.plateaukao.einkbro.unit.ShareUtil
 import info.plateaukao.einkbro.unit.ViewUnit
@@ -61,13 +61,18 @@ class ActionModeMenuViewModel : ViewModel(), KoinComponent {
     fun showActionModeView(
         context: Context,
         parent: ViewGroup,
-        clearSelectionAction: () -> Unit
+        translationViewModel: TranslationViewModel,
+        clearSelectionAction: () -> Unit,
     ) {
         if (actionModeView == null) {
             actionModeView = ActionModeView(context = context).apply {
                 init(
                     actionModeMenuViewModel = this@ActionModeMenuViewModel,
-                    menuInfos = getAllProcessTextMenuInfos(context, context.packageManager),
+                    menuInfos = getAllProcessTextMenuInfos(
+                        context,
+                        context.packageManager,
+                        translationViewModel,
+                    ),
                     clearSelectionAction = clearSelectionAction
                 )
             }
@@ -142,7 +147,8 @@ class ActionModeMenuViewModel : ViewModel(), KoinComponent {
 
     private fun getAllProcessTextMenuInfos(
         context: Context,
-        packageManager: PackageManager
+        packageManager: PackageManager,
+        translationViewModel: TranslationViewModel,
     ): List<MenuInfo> {
         val intent = Intent(Intent.ACTION_PROCESS_TEXT).apply {
             type = "text/plain"
@@ -187,22 +193,52 @@ class ActionModeMenuViewModel : ViewModel(), KoinComponent {
                 action = { _actionModeMenuState.value = ActionModeMenuState.DeeplTranslate }
             )
         )
-        if (configManager.gptApiKey.isNotEmpty() && configManager.gptActionList.isNotEmpty()) {
-            for (actionInfo in configManager.gptActionList) {
+        if (configManager.gptActionList.isNotEmpty()) {
+            configManager.gptActionList.mapIndexed { index, actionInfo ->
+
+                val actionType = actionInfo.actionType.takeIf { it != GptActionType.Default }
+                    ?: configManager.getDefaultActionType()
+
+                val iconRes = when (actionType) {
+                    GptActionType.OpenAi -> R.drawable.ic_chat_gpt
+                    GptActionType.SelfHosted -> R.drawable.ic_ollama
+                    GptActionType.Gemini -> R.drawable.ic_gemini
+                    else -> R.drawable.ic_chat_gpt
+                }
                 menuInfos.add(
-                    0,
+                    0 + index,
                     MenuInfo(
                         actionInfo.name,
-                        icon = ContextCompat.getDrawable(context, R.drawable.ic_chat_gpt),
-                        action = {
-                            _actionModeMenuState.value =
-                                ActionModeMenuState.Gpt(actionInfo)
-                        }
+                        icon = ContextCompat.getDrawable(context, iconRes),
+                        action = { _actionModeMenuState.value = ActionModeMenuState.Gpt(index) },
+                        longClickAction = { translationViewModel.showEditGptActionDialog(index) }
                     )
                 )
             }
         }
 
+        menuInfos.add(
+            0,
+            MenuInfo(
+                context.getString(R.string.select_paragraph),
+                icon = ContextCompat.getDrawable(context, R.drawable.ic_reselect),
+                closeMenu = false,
+                action = {
+                    _actionModeMenuState.value = ActionModeMenuState.SelectParagraph
+                }
+            )
+        )
+        menuInfos.add(
+            0,
+            MenuInfo(
+                context.getString(R.string.select_sentence),
+                icon = ContextCompat.getDrawable(context, R.drawable.ic_reselect),
+                closeMenu = false,
+                action = {
+                    _actionModeMenuState.value = ActionModeMenuState.SelectSentence
+                }
+            )
+        )
         menuInfos.add(
             0,
             MenuInfo(
@@ -261,13 +297,15 @@ class ActionModeMenuViewModel : ViewModel(), KoinComponent {
 }
 
 sealed class ActionModeMenuState {
-    object Idle : ActionModeMenuState()
-    class Gpt(val gptAction: ChatGPTActionInfo) : ActionModeMenuState()
-    object GoogleTranslate : ActionModeMenuState()
-    object DeeplTranslate : ActionModeMenuState()
-    object Papago : ActionModeMenuState()
-    object Naver : ActionModeMenuState()
+    data object Idle : ActionModeMenuState()
+    class Gpt(val gptActionIndex: Int) : ActionModeMenuState()
+    data object GoogleTranslate : ActionModeMenuState()
+    data object DeeplTranslate : ActionModeMenuState()
+    data object Papago : ActionModeMenuState()
+    data object Naver : ActionModeMenuState()
     class SplitSearch(val stringFormat: String) : ActionModeMenuState()
     class Tts(val text: String) : ActionModeMenuState()
     class HighlightText(val highlightStyle: HighlightStyle) : ActionModeMenuState()
+    data object SelectSentence : ActionModeMenuState()
+    data object SelectParagraph : ActionModeMenuState()
 }
