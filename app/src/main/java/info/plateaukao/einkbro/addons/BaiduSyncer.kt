@@ -198,6 +198,14 @@ class BaiduSyncer(
             }
             return url
         }
+
+        // Checks whether a WebView instance is indeed loaded.
+        private fun isLoaded(webView: NinjaWebView): Boolean {
+            // TODO: add i18n support
+            return webView.album.isLoaded &&
+                   webView.albumTitle != "Webpage not available" &&
+                   webView.albumTitle != "网页无法打开"
+        }
     }
 
     // For GUI interactions.
@@ -651,16 +659,19 @@ class BaiduSyncer(
     private fun preload() {
         if (!config.preloading) return
 
+        var seen = mutableSetOf<Pair<NinjaWebView, String>>()
         val total = runAndWait(period = config.wait * 1000L, repeated = true) {
             var result = Pair(true, 0)
-            for (controller in browserContainer.list()) {
+            for (controller in browserContainer.list().take(config.slots)) {
                 val webView = controller as NinjaWebView
-                if (!webView.album.isLoaded && webView.initAlbumUrl.isNotEmpty()) {
-                    log(Log.DEBUG, "Preloading ${webView.initAlbumUrl}")
-                    webView.loadUrl(webView.initAlbumUrl)
-                    result = Pair(false, 1)
-                    break
-                }
+                val key = Pair(webView, webView.initAlbumUrl)
+                if (key in seen) continue
+                seen.add(key)
+                if (isLoaded(webView) || webView.initAlbumUrl.isEmpty()) continue
+                log(Log.DEBUG, "Preloading ${webView.initAlbumUrl}")
+                webView.loadUrl(webView.initAlbumUrl)
+                result = Pair(false, 1)
+                break
             }
             result
         }
