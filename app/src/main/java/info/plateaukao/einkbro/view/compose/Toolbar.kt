@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,15 +22,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -48,12 +53,19 @@ import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.view.Album
 import info.plateaukao.einkbro.view.dialog.compose.HorizontalSeparator
 import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction
-import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction.Desktop
+import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction.Bookmark
 import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction.NewTab
 import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction.PageInfo
+import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction.Spacer1
+import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction.Spacer2
 import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction.TabCount
+import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction.Time
 import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction.Title
 import info.plateaukao.einkbro.view.toolbaricons.ToolbarActionInfo
+import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 
 private val toolbarIconWidth = 46.dp
@@ -127,8 +139,8 @@ fun ComposedIconBar(
     onLongClick: ((ToolbarAction) -> Unit)? = null,
 ) {
     val screenWidth = LocalConfiguration.current.screenWidthDp
-    val shouldTitleWidthFixed =
-        (toolbarActionInfos.filter { it.toolbarAction != Title }.size + 1) * 46 > screenWidth
+    val shouldTitleWidthFixed = toolbarActionInfos.map { it.toolbarAction }.contains(Title) &&
+            (toolbarActionInfos.filter { it.toolbarAction != Title }.size + 1) * 46 > screenWidth
     Row(
         modifier = Modifier
             .height(50.dp)
@@ -173,38 +185,54 @@ fun ComposedIconBar(
                     }
                 }
 
-                TabCount ->
-                    TabCountIcon(
-                        isIncognito = isIncognito,
-                        count = tabCount,
-                        onClick = { onClick(toolbarAction) },
-                        onLongClick = { onLongClick?.invoke(toolbarAction) }
-                    )
+                // show a current time (hour:minute) in the toolbar
+                Time -> CurrentTimeText()
 
-                PageInfo -> Text(
-                    text = pageInfo,
-                    color = MaterialTheme.colors.onBackground,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .padding(2.dp)
-                        .defaultMinSize(minWidth = 46.dp)
-                        .combinedClickable {
-                            onClick(toolbarAction)
-                            onLongClick?.invoke(toolbarAction)
-                        }
+                TabCount -> TabCountIcon(isIncognito, tabCount, onClick, onLongClick)
+
+                PageInfo -> PageInfoIcon(pageInfo, onClick, onLongClick)
+
+                Spacer1, Spacer2 -> Spacer(modifier = Modifier.weight(1F))
+
+                else -> ToolbarIcon(
+                    toolbarAction,
+                    toolbarActionInfo.getCurrentResId(),
+                    onClick,
+                    onLongClick
                 )
-
-                else -> ToolbarIcon(toolbarActionInfo, onClick, onLongClick)
             }
         }
     }
 }
 
+// pageInfo
+@Composable
+fun PageInfoIcon(
+    pageInfo: String,
+    onClick: (ToolbarAction) -> Unit,
+    onLongClick: ((ToolbarAction) -> Unit)? = null,
+) {
+    Text(
+        text = pageInfo,
+        color = MaterialTheme.colors.onBackground,
+        fontSize = 12.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .padding(2.dp)
+            .defaultMinSize(minWidth = 46.dp)
+            .wrapContentWidth()
+            .combinedClickable(
+                onClick = { onClick(PageInfo) },
+                onLongClick = { onLongClick?.invoke(PageInfo) }
+            )
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ToolbarIcon(
-    toolbarActionInfo: ToolbarActionInfo,
+    toolbarAction: ToolbarAction,
+    iconResId: Int,
     onClick: (ToolbarAction) -> Unit,
     onLongClick: ((ToolbarAction) -> Unit)? = null,
 ) {
@@ -212,7 +240,6 @@ fun ToolbarIcon(
     val pressed by interactionSource.collectIsPressedAsState()
     val borderWidth = if (pressed) 0.5.dp else (-1).dp
 
-    val toolbarAction = toolbarActionInfo.toolbarAction
     Icon(
         modifier = Modifier
             .fillMaxHeight()
@@ -227,7 +254,7 @@ fun ToolbarIcon(
             )
             .padding(6.dp)
             .testTag(toolbarAction.name.lowercase()),
-        painter = painterResource(id = toolbarActionInfo.getCurrentResId()),
+        painter = painterResource(id = iconResId),
         contentDescription = stringResource(id = toolbarAction.titleResId),
         tint = MaterialTheme.colors.onBackground
     )
@@ -238,8 +265,8 @@ fun ToolbarIcon(
 private fun TabCountIcon(
     isIncognito: Boolean,
     count: String,
-    onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null,
+    onClick: (ToolbarAction) -> Unit,
+    onLongClick: ((ToolbarAction) -> Unit)? = null,
 ) {
     val border = if (isIncognito)
         Modifier.dashedBorder(1.dp, 7.dp, color = MaterialTheme.colors.onBackground)
@@ -251,8 +278,8 @@ private fun TabCountIcon(
             .height(toolbarIconWidth)
             .width(toolbarIconWidth)
             .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
+                onClick = { onClick(TabCount) },
+                onLongClick = { onLongClick?.invoke(TabCount) }
             ),
         contentAlignment = Alignment.Center
     ) {
@@ -270,9 +297,34 @@ private fun TabCountIcon(
     }
 }
 
+@Composable
+fun CurrentTimeText(
+    modifier: Modifier = Modifier,
+) {
+    var currentTime by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            currentTime = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            delay(1000L * 60) // Update every second
+        }
+    }
+
+    Text(
+        text = currentTime,
+        color = MaterialTheme.colors.onBackground,
+        modifier = modifier
+            .wrapContentWidth()
+            .padding(horizontal = 6.dp),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = TextAlign.Center,
+    )
+}
+
 private inline fun Modifier.conditional(
     condition: Boolean,
-    modifier: Modifier.() -> Modifier
+    modifier: Modifier.() -> Modifier,
 ): Modifier {
     return if (condition) {
         modifier.invoke(this)
@@ -318,11 +370,14 @@ fun PreviewToolbarLongTitle() {
     MyTheme {
         ComposedIconBar(
             toolbarActionInfos = listOf(
-                ToolbarActionInfo(Desktop, false),
+                ToolbarActionInfo(Bookmark, false),
+                ToolbarActionInfo(Spacer1, false),
                 ToolbarActionInfo(TabCount, false),
-                ToolbarActionInfo(Title, false),
-                ToolbarActionInfo(Desktop, false),
-                ToolbarActionInfo(Desktop, false),
+                ToolbarActionInfo(ToolbarAction.InputUrl, false),
+                ToolbarActionInfo(ToolbarAction.IconSetting, false),
+                ToolbarActionInfo(PageInfo, false),
+                ToolbarActionInfo(Spacer2, false),
+                ToolbarActionInfo(Time, false),
             ),
             "hi 1 2 3 456789",
             tabCount = "1",

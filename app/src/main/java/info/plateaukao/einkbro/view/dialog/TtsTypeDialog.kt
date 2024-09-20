@@ -4,24 +4,24 @@ import android.content.Context
 import androidx.appcompat.app.AlertDialog
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.preference.ConfigManager
+import info.plateaukao.einkbro.viewmodel.TtsType
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
-import java.util.Locale
 
-class TtsLanguageDialog(val context: Context) : KoinComponent {
+class TtsTypeDialog(val context: Context) : KoinComponent {
     private val config: ConfigManager by inject()
 
-    fun show(locales: List<Locale>) {
-        val availableLocales = locales.sortedBy { it.displayName }
-        val availableLocalDisplayNames = availableLocales.map { it.displayName }.toTypedArray()
-
+    fun show(action: (TtsType) -> Unit) {
+        val types = TtsType.entries
         AlertDialog.Builder(context, R.style.TouchAreaDialog).apply {
-            setTitle("Read in Which Language")
+            setTitle("Read by Which Engine")
             setSingleChoiceItems(
-                availableLocalDisplayNames, availableLocales.indexOf(config.ttsLocale)
+                types.map { it.name }.toTypedArray(),
+                config.ttsType.ordinal
             ) { dialog, selectedIndex ->
-                val locale = availableLocales[selectedIndex]
-                config.ttsLocale = locale
+                val newType = types[selectedIndex]
+                config.ttsType = newType
+                action(newType)
                 dialog.dismiss()
             }
         }.create().show()

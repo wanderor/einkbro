@@ -10,7 +10,9 @@ plugins {
 }
 
 fun getCurrentTimestamp(): String {
-    return SimpleDateFormat("MMddHHmm").format(Date())
+    val dateFormat = SimpleDateFormat("MMddHHmm")
+    dateFormat.timeZone = TimeZone.getTimeZone("Asia/Taipei")
+    return dateFormat.format(Date())
 }
 
 fun showUpdateButton(): String {
@@ -26,8 +28,8 @@ android {
         applicationId = "info.plateaukao.einkbro"
         minSdk = 24
         targetSdk = 34
-        versionCode = 11_15_00
-        versionName = "11.15.0"
+        versionCode = 11_17_00
+        versionName = "11.17.0"
 
         buildConfigField("String", "builtDateTime", "\"${getCurrentTimestamp()}\"")
         buildConfigField("boolean", "showUpdateButton", showUpdateButton())
@@ -85,7 +87,7 @@ android {
 }
 
 dependencies {
-    implementation("com.google.android.material:material:1.11.0")
+    implementation("com.google.android.material:material:1.12.0")
 
     // epublib
     implementation("com.positiondev.epublib:epublib-core:3.1") {
@@ -106,18 +108,18 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.activity:activity-compose:1.8.2")
-    implementation("androidx.compose.ui:ui:1.6.0")
-    implementation("androidx.navigation:navigation-runtime-ktx:2.7.6")
-    implementation("androidx.navigation:navigation-compose:2.8.0-beta01")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
+    implementation("androidx.activity:activity-compose:1.9.1")
+    implementation("androidx.compose.ui:ui:1.6.8")
+    implementation("androidx.navigation:navigation-runtime-ktx:2.7.7")
+    implementation("androidx.navigation:navigation-compose:2.8.0-rc01")
 
-    debugImplementation("androidx.compose.ui:ui-test-manifest:1.6.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.6.8")
 
-    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.4")
 
     // for dark mode
-    implementation("androidx.webkit:webkit:1.10.0")
+    implementation("androidx.webkit:webkit:1.11.0")
 
     val koinVersion = "3.1.2"
     // Koin core features
@@ -132,22 +134,23 @@ dependencies {
 
     // compose
     // Compose Material Design
-    implementation("androidx.compose.material:material:1.6.0")
+    implementation("androidx.compose.material:material:1.6.8")
     // Tooling support (Previews, etc.)
-    debugImplementation("androidx.compose.ui:ui-tooling:1.6.0")
-    implementation("androidx.compose.ui:ui-tooling-preview:1.6.0")
+    debugImplementation("androidx.compose.ui:ui-tooling:1.6.8")
+    implementation("androidx.compose.ui:ui-tooling-preview:1.6.8")
     // UI Tests
-    androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.6.0")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.6.8")
 
     implementation("com.google.accompanist:accompanist-drawablepainter:0.31.0-alpha")
 
     // reorder lazylist
-    implementation("org.burnoutcrew.composereorderable:reorderable:0.9.6")
+    //implementation("org.burnoutcrew.composereorderable:reorderable:0.9.6")
+    implementation("sh.calvin.reorderable:reorderable:2.3.1")
 
     // okhttp
-    implementation("com.squareup.okhttp3:okhttp:4.11.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-sse:4.11.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.5.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     // retrofit
     implementation("com.squareup.retrofit2:retrofit:2.11.0")

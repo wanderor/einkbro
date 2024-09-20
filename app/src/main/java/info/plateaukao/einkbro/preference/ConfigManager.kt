@@ -8,6 +8,8 @@ import android.os.Build
 import android.print.PrintAttributes
 import androidx.compose.ui.graphics.Color
 import androidx.core.content.edit
+import icu.xmc.edgettslib.entity.VoiceItem
+import icu.xmc.edgettslib.entity.dummyVoiceItem
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.database.Bookmark
 import info.plateaukao.einkbro.database.BookmarkManager
@@ -20,6 +22,7 @@ import info.plateaukao.einkbro.view.GestureType
 import info.plateaukao.einkbro.view.Orientation
 import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction
 import info.plateaukao.einkbro.viewmodel.TRANSLATE_API
+import info.plateaukao.einkbro.viewmodel.TtsType
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.Json.Default.decodeFromString
@@ -50,6 +53,11 @@ class ConfigManager(
     var enableViBinding by BooleanPreference(sp, K_VI_BINDING, false)
     var isMultitouchEnabled by BooleanPreference(sp, K_MULTITOUCH, false)
     var useUpDownPageTurn by BooleanPreference(sp, K_UPDOWN_PAGE_TURN, false)
+    var disableLongPressTouchArea by BooleanPreference(
+        sp,
+        "sp_disable_long_press_touch_area",
+        false
+    )
     var touchAreaHint by BooleanPreference(sp, K_TOUCH_HINT, true)
     var volumePageTurn by BooleanPreference(sp, K_VOLUME_PAGE_TURN, true)
     var boldFontStyle by BooleanPreference(sp, K_BOLD_FONT, false)
@@ -139,6 +147,8 @@ class ConfigManager(
         }
 
     var useOpenAiTts by BooleanPreference(sp, K_USE_OPENAI_TTS, true)
+
+    var webLoadCacheFirst by BooleanPreference(sp, "sp_web_load_cache_first", true)
 
     var pageReservedOffset: Int by IntPreference(sp, K_PRESERVE_HEIGHT, 80)
 
@@ -240,6 +250,20 @@ class ConfigManager(
     var navGestureLeft by GestureTypePreference(sp, K_GESTURE_NAV_LEFT)
     var navGestureRight by GestureTypePreference(sp, K_GESTURE_NAV_RIGHT)
 
+    var upClickGesture by GestureTypePreference(
+        sp, "K_UP_CLICK_GESTURE", GestureType.PageUp
+    )
+    var downClickGesture by GestureTypePreference(
+        sp, "K_DOWN_CLICK_GESTURE", GestureType.PageDown
+    )
+    var upLongClickGesture by GestureTypePreference(
+        sp, "K_UP_LONG_CLICK_GESTURE", GestureType.ScrollToTop
+    )
+    var downLongClickGesture by GestureTypePreference(
+        sp, "K_DOWN_LONG_CLICK_GESTURE", GestureType.ScrollToBottom
+    )
+
+
     private val K_EXTERNAL_SEARCH_METHOD = "sp_external_search_method"
     var externalSearchMethod: TRANSLATE_API
         get() = TRANSLATE_API.entries[sp.getInt(K_EXTERNAL_SEARCH_METHOD, 0)]
@@ -264,19 +288,65 @@ class ConfigManager(
             sp.edit { putInt("pdf_paper_size", value.ordinal) }
         }
 
-    var localeLanguage: TranslationLanguage
-        get() = TranslationLanguage.entries[sp.getInt(
-            "sp_locale_language",
-            getDefaultTranslationLanguage().ordinal
-        )]
+    var ttsType: TtsType
+        get() = TtsType.entries[sp.getInt("K_TTS_TYPE", 0)]
         set(value) {
-            sp.edit { putInt("sp_locale_language", value.ordinal) }
+            sp.edit { putInt("K_TTS_TYPE", value.ordinal) }
+            useOpenAiTts = value == TtsType.GPT
         }
+
+    private val K_RECENT_USED_TTS_VOICES = "sp_recent_used_tts_voices"
+    var recentUsedTtsVoices: MutableList<VoiceItem>
+        get() {
+            val string = sp.getString(K_RECENT_USED_TTS_VOICES, "").orEmpty()
+            if (string.isBlank()) return mutableListOf()
+
+            return try {
+                string.split("###")
+                    .mapNotNull { Json.decodeFromString<VoiceItem>(it) }
+                    .toMutableList()
+            } catch (exception: Exception) {
+                sp.edit { remove(K_RECENT_USED_TTS_VOICES) }
+                mutableListOf()
+            }
+        }
+        set(value) {
+            val processedValue = if (value.distinct().size > 5) {
+                value.distinct().subList(0, 5)
+            } else {
+                value.distinct()
+            }
+
+            sp.edit {
+                if (processedValue.isEmpty()) {
+                    remove(K_RECENT_USED_TTS_VOICES)
+                } else {
+                    // check if the new value the same as the old one
+                    putString(
+                        K_RECENT_USED_TTS_VOICES,
+                        processedValue.joinToString("###") { Json.encodeToString(it) }
+                    )
+                }
+            }
+        }
+
+    var ettsVoice: VoiceItem
+        get() = Json.decodeFromString(
+            sp.getString(
+                "K_ETTS_VOICE", Json.encodeToString(dummyVoiceItem)
+            ) ?: Json.encodeToString(dummyVoiceItem)
+        )
+        set(value) {
+            sp.edit { putString("K_ETTS_VOICE", Json.encodeToString(value)) }
+            recentUsedTtsVoices = recentUsedTtsVoices.apply { add (0, value) }
+        }
+
+    var uiLocaleLanguage by StringPreference(sp, "sp_ui_locale_language", "")
 
     var translationLanguage: TranslationLanguage
         get() = TranslationLanguage.entries[sp.getInt(
             K_TRANSLATE_LANGUAGE,
-            getDefaultTranslationLanguage().ordinal
+            TranslationLanguage.EN.ordinal
         )]
         set(value) {
             sp.edit { putInt(K_TRANSLATE_LANGUAGE, value.ordinal) }
@@ -380,6 +450,7 @@ class ConfigManager(
 
     fun hasInvertedColor(url: String): Boolean =
         Uri.parse(url)?.host?.let { domainConfigurationMap[it]?.shouldInvertColor } ?: false
+
     fun toggleInvertedColor(url: String): Boolean {
         val host = Uri.parse(url)?.host ?: return false
 
@@ -728,8 +799,14 @@ class ConfigManager(
     }
 
     private fun getDefaultIconStrings(): String =
-        ToolbarAction.defaultActions.joinToString(",") { action ->
-            action.ordinal.toString()
+        if (ViewUnit.isWideLayout(context)) {
+            ToolbarAction.defaultActions.joinToString(",") { action ->
+                action.ordinal.toString()
+            }
+        } else {
+            ToolbarAction.defaultActionsForPhone.joinToString(",") { action ->
+                action.ordinal.toString()
+            }
         }
 
     companion object {
@@ -891,7 +968,7 @@ class ConfigManager(
         private const val RECENT_BOOKMARK_LIST_SIZE = 10
 
         private const val K_SPLIT_SEARCH_ITEMS = "sp_split_search_items"
-        private const val K_GPT_ACTION_ITEMS = "sp_gpt_action_items"
+        const val K_GPT_ACTION_ITEMS = "sp_gpt_action_items"
         private const val K_GPT_ACTION_EXTERNAL = "sp_gpt_action_external"
 
         private const val K_GPT_SERVER_URL = "sp_gpt_server_url"
@@ -961,10 +1038,11 @@ class StringPreference(
 class GestureTypePreference(
     private val sharedPreferences: SharedPreferences,
     private val key: String,
+    private val defaultValue: GestureType = GestureType.NothingHappen,
 ) : ReadWriteProperty<Any, GestureType> {
 
     override fun getValue(thisRef: Any, property: KProperty<*>): GestureType =
-        GestureType.from(sharedPreferences.getString(key, "01") ?: "01")
+        GestureType.from(sharedPreferences.getString(key, defaultValue.value) ?: defaultValue.value)
 
     override fun setValue(thisRef: Any, property: KProperty<*>, value: GestureType) =
         sharedPreferences.edit { putString(key, value.value) }

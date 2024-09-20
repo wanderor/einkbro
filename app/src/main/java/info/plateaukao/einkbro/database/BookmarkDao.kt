@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
@@ -35,7 +36,7 @@ import org.koin.core.component.inject
         ChatGptQuery::class,
         DomainConfiguration::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -137,8 +138,8 @@ interface BookmarkDao {
     @Query("SELECT * FROM bookmarks WHERE parent = :parentId ORDER BY title COLLATE NOCASE ASC")
     suspend fun getBookmarksByParent(parentId: Int): List<Bookmark>
 
-    @Query("SELECT * FROM bookmarks WHERE parent = :parentId ORDER BY title COLLATE NOCASE ASC")
-    fun getBookmarksByParentFlow(parentId: Int): Flow<List<Bookmark>>
+//    @Query("SELECT * FROM bookmarks WHERE parent = :parentId ORDER BY title COLLATE NOCASE ASC")
+//    fun getBookmarksByParentFlow(parentId: Int): Flow<List<Bookmark>>
 
     @Query("SELECT COUNT(id) FROM bookmarks WHERE url = :url")
     suspend fun existsUrl(url: String): Int
@@ -153,7 +154,7 @@ interface BookmarkDao {
     suspend fun delete(bookmark: Bookmark)
 
     @Update
-    suspend fun update(bookmark: Bookmark)
+    fun update(bookmark: Bookmark)
 
     @Query("DELETE FROM bookmarks")
     suspend fun deleteAll()
@@ -191,7 +192,12 @@ class BookmarkManager(context: Context) : KoinComponent {
     private val migration4To5: Migration = object : Migration(4, 5) {
         override fun migrate(database: SupportSQLiteDatabase) {
             database.execSQL("CREATE TABLE IF NOT EXISTS `domain_configuration` (`domain` TEXT NOT NULL, `configuration` TEXT NOT NULL, PRIMARY KEY(`domain`))")
+        }
+    }
 
+    private val migration5To6: Migration = object : Migration(5, 6) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL("ALTER TABLE `bookmarks` ADD COLUMN `order` INTEGER DEFAULT 0 NOT NULL")
         }
     }
 
@@ -200,6 +206,7 @@ class BookmarkManager(context: Context) : KoinComponent {
         .addMigrations(migration2To3)
         .addMigrations(migration3To4)
         .addMigrations(migration4To5)
+        .addMigrations(migration5To6)
         .build()
 
     val bookmarkDao = database.bookmarkDao()
@@ -297,6 +304,18 @@ class BookmarkManager(context: Context) : KoinComponent {
 
     suspend fun deleteFavicon(faviconInfo: FaviconInfo) = faviconDao.delete(faviconInfo)
 
+    // -- Bookmark --
+
+    suspend fun updateBookmarksOrder(bookmarks: List<Bookmark>) {
+        withContext(Dispatchers.IO) {
+            database.runInTransaction {
+                bookmarks.forEachIndexed { index, bookmark ->
+                    bookmarkDao.update(bookmark.apply { this.order = index })
+                }
+            }
+        }
+    }
+
     suspend fun getAllBookmarks(): List<Bookmark> = bookmarkDao.getAllBookmarks()
 
     suspend fun getAllBookmarksOnly(): List<Bookmark> = bookmarkDao.getAllBookmarksOnly()
@@ -322,26 +341,17 @@ class BookmarkManager(context: Context) : KoinComponent {
 
     suspend fun findBy(url: String): List<Bookmark> = bookmarkDao.findBy(url)
 
-    suspend fun insertDirectory(title: String, parentId: Int = 0) {
-        bookmarkDao.insert(
-            Bookmark(
-                title = title,
-                url = "",
-                isDirectory = true,
-                parent = parentId,
-            )
-        )
-    }
-
     suspend fun delete(bookmark: Bookmark) = bookmarkDao.delete(bookmark)
 
     suspend fun update(bookmark: Bookmark) = bookmarkDao.update(bookmark)
+
     suspend fun overwriteBookmarks(bookmarks: List<Bookmark>) {
         if (bookmarks.isNotEmpty()) bookmarkDao.overwrite(bookmarks)
     }
 
     suspend fun getAllChatGptQueriesAsync(): List<ChatGptQuery> =
         chatGptQueryDao.getAllChatGptQueriesAsync()
+
     fun getAllChatGptQueries(): Flow<List<ChatGptQuery>> = chatGptQueryDao.getAllChatGptQueries()
     suspend fun addChatGptQuery(chatGptQuery: ChatGptQuery) =
         chatGptQueryDao.addChatGptQuery(chatGptQuery)
@@ -362,6 +372,7 @@ class BookmarkManager(context: Context) : KoinComponent {
                 put(it.domain, json.decodeFromString<DomainConfigurationData>(it.configuration))
             }
         }
+
     fun addDomainConfiguration(domainConfigurationData: DomainConfigurationData) =
         GlobalScope.launch(Dispatchers.IO) {
             domainConfigurationDao.addDomainConfiguration(
@@ -374,4 +385,9 @@ class BookmarkManager(context: Context) : KoinComponent {
                 )
             )
         }
+
+    enum class SortMode {
+        BY_ORDER,
+        BY_TITLE,
+    }
 }

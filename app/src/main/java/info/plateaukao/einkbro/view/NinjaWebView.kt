@@ -38,6 +38,7 @@ import info.plateaukao.einkbro.preference.FontType
 import info.plateaukao.einkbro.preference.HighlightStyle
 import info.plateaukao.einkbro.preference.TranslationMode
 import info.plateaukao.einkbro.unit.BrowserUnit
+import info.plateaukao.einkbro.unit.HelperUnit
 import info.plateaukao.einkbro.unit.ViewUnit.dp
 import info.plateaukao.einkbro.util.PdfDocumentAdapter
 import info.plateaukao.einkbro.viewmodel.TRANSLATE_API
@@ -80,6 +81,7 @@ open class NinjaWebView(
     private val cookie: Cookie by inject()
 
     var translateApi: TRANSLATE_API = TRANSLATE_API.GOOGLE
+    var isTranslateByParagraph = false
     override var isTranslatePage = false
         set(value) {
             field = value
@@ -139,11 +141,15 @@ open class NinjaWebView(
 
     override fun reload() {
         isTranslatePage = false
-        settings.cacheMode = WebSettings.LOAD_DEFAULT
         isVerticalRead = false
         isReaderModeOn = false
         settings.textZoom = config.fontSize
+        settings.cacheMode = WebSettings.LOAD_DEFAULT
         super.reload()
+
+        postDelayed({
+            if (config.webLoadCacheFirst) settings.cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
+        }, 2000)
     }
 
     override fun goBack() {
@@ -226,17 +232,19 @@ open class NinjaWebView(
             loadWithOverviewMode = true
             useWideViewPort = true
         }
-
     }
 
     @Suppress("DEPRECATION")
     fun initPreferences() {
 
         updateUserAgentString()
+        setLayerType(LAYER_TYPE_HARDWARE, null) // Enable hardware acceleration
 
         with(settings) {
             // don't load cache by default, so that it won't cause some issues
-            //cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
+            if (config.webLoadCacheFirst)
+                cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
+
             textZoom = config.fontSize
             allowFileAccessFromFileURLs = config.enableRemoteAccess
             allowFileAccess = true
@@ -259,7 +267,6 @@ open class NinjaWebView(
             }
         }
         webViewClient.enableAdBlock(config.adBlock)
-
         toggleCookieSupport(config.cookies)
     }
 
@@ -328,6 +335,7 @@ open class NinjaWebView(
 
         dualCaption = null
         isTranslatePage = false
+        isTranslateByParagraph = false
         browserController?.resetTranslateUI()
 
         bookmarkManager.findFaviconBy(url)?.getBitmap()?.let {
@@ -346,6 +354,7 @@ open class NinjaWebView(
         album.isLoaded = true
 
         isTranslatePage = false
+        isTranslateByParagraph = false
         browserController?.resetTranslateUI()
 
         if (url.startsWith("javascript:") || url.startsWith("content:")) {
@@ -512,7 +521,7 @@ open class NinjaWebView(
     } else { // normal case
         val nonNullUrl = url.orEmpty()
         if (config.shouldFixScroll(nonNullUrl) || config.shouldSendPageNavKey(nonNullUrl)) {
-            callScrollFixPageDown()
+            sendPageDownKey()
         } else {
             scrollBy(0, shiftOffset())
             scrollY = min(computeVerticalScrollRange() - shiftOffset(), scrollY)
@@ -525,16 +534,16 @@ open class NinjaWebView(
     } else { // normal case
         val nonNullUrl = url.orEmpty()
         if (config.shouldFixScroll(nonNullUrl) || config.shouldSendPageNavKey(nonNullUrl)) {
-            callScrollFixPageUp()
+            sendPageUpKey()
         } else {
             scrollBy(0, -shiftOffset())
             scrollY = max(0, scrollY)
         }
     }
 
-    private fun callScrollFixPageDown() = sendKeyEventToView(KeyEvent.KEYCODE_PAGE_DOWN)
+    fun sendPageDownKey() = sendKeyEventToView(KeyEvent.KEYCODE_PAGE_DOWN)
 
-    private fun callScrollFixPageUp() = sendKeyEventToView(KeyEvent.KEYCODE_PAGE_UP)
+    fun sendPageUpKey() = sendKeyEventToView(KeyEvent.KEYCODE_PAGE_UP)
 
     fun removeTextSelection() {
         evaluateJavascript(
@@ -779,10 +788,11 @@ open class NinjaWebView(
     fun translateByParagraphInPlace() {
         evaluateJavascript(translateParagraphJs) {
             evaluateJavascript(textNodesMonitorJs, null)
+            isTranslateByParagraph = true
         }
     }
 
-    fun showTranslation() = browserController?.showTranslation()
+    fun showTranslation() = browserController?.showTranslation(this)
 
     fun addSelectionChangeListener() {
         evaluateJavascript(textSelectionChangeJs, null)
@@ -841,9 +851,9 @@ open class NinjaWebView(
         injectCss(cssByteArray)
         if (isVertical) injectCss(verticalLayoutCss.toByteArray())
 
-        val jsString = getStringFromAsset("MozReadability.js")
+        val jsString = HelperUnit.getStringFromAsset("MozReadability.js")
         evaluateJavascript(jsString) {
-            evaluateJavascript("javascript:(function() { window.scrollTo(0, 0); })()", null)
+            //evaluateJavascript("javascript:(function() { window.scrollTo(0, 0); })()", null)
             postAction?.invoke()
         }
     }
@@ -918,9 +928,6 @@ open class NinjaWebView(
             ByteArray(0)
         }
     }
-
-    private fun getStringFromAsset(fileName: String): String =
-        context.assets.open(fileName).bufferedReader().use { it.readText() }
 
     private fun injectCss(bytes: ByteArray) {
         try {
@@ -1295,8 +1302,8 @@ open class NinjaWebView(
                  font-display: swap;
                  src: url('mycustomfont');
             }
-            * {
-              font-family: fontfamily !important;
+            html body * {
+              font-family: fontfamily, serif, popular-symbols, lite-glyphs-outlined, lite-glyphs-filled, snaptu-symbols !important;
             }
         """
 

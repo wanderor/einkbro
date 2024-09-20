@@ -7,6 +7,7 @@ import android.util.AttributeSet
 import android.view.KeyEvent.KEYCODE_ENTER
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +52,7 @@ import info.plateaukao.einkbro.database.BookmarkManager
 import info.plateaukao.einkbro.database.Record
 import info.plateaukao.einkbro.unit.ViewUnit
 import info.plateaukao.einkbro.view.dialog.compose.HorizontalSeparator
+import kotlinx.coroutines.launch
 
 class AutoCompleteTextComposeView @JvmOverloads constructor(
     context: Context,
@@ -89,13 +92,18 @@ class AutoCompleteTextComposeView @JvmOverloads constructor(
     }
 
     fun getFocus() {
-        // try catch for IllegalStateException: FocusRequester is already active
-        try {
-            focusRequester.requestFocus()
-            postDelayed({ ViewUnit.showKeyboard(context as Activity) }, 400)
-        } catch (e: IllegalStateException) {
-            e.printStackTrace()
-        }
+        postDelayed(
+            {
+                ViewUnit.showKeyboard(context as Activity)
+                try {
+                    // need to call it after some delay to make sure the view is ready
+                    focusRequester.requestFocus()
+                } catch (e: IllegalStateException) {
+                    // try catch for IllegalStateException: FocusRequester is already active
+                    e.printStackTrace()
+                }
+            }, 200
+        )
     }
 }
 
@@ -127,42 +135,29 @@ fun AutoCompleteTextField(
     Column(
         Modifier
             .background(Color.Transparent)
-            .clickable { closeAction() }
-            .focusRequester(requester),
+            .clickable { closeAction() },
         verticalArrangement = if (shouldReverse) Arrangement.Bottom else Arrangement.Top
     ) {
-        if (shouldReverse) {
-            HorizontalSeparator()
-            BrowseHistoryList(
-                modifier = Modifier
-                    .weight(1F, fill = false)
-                    .background(MaterialTheme.colors.background),
-                records = filteredRecordList,
-                bookmarkManager = bookmarkManager,
-                shouldReverse = shouldReverse,
-                shouldShowTwoColumns = isWideLayout,
-                onClick = onRecordClick,
-                onLongClick = {}
-            )
-            HorizontalSeparator()
+        if (!shouldReverse) {
+            TextInputBar(requester, text, onTextSubmit, hasCopiedText, onPasteClick, closeAction)
         }
 
-        TextInputBar(requester, text, onTextSubmit, hasCopiedText, onPasteClick, closeAction)
+        HorizontalSeparator()
+        BrowseHistoryList(
+            modifier = Modifier
+                .weight(1F, fill = false)
+                .background(MaterialTheme.colors.background),
+            records = filteredRecordList,
+            bookmarkManager = bookmarkManager,
+            shouldReverse = shouldReverse,
+            shouldShowTwoColumns = isWideLayout,
+            onClick = onRecordClick,
+            onLongClick = {}
+        )
+        HorizontalSeparator()
 
-        if (!shouldReverse) {
-            HorizontalSeparator()
-            BrowseHistoryList(
-                modifier = Modifier
-                    .weight(1F, fill = false)
-                    .background(MaterialTheme.colors.background),
-                records = filteredRecordList,
-                bookmarkManager = bookmarkManager,
-                shouldReverse = shouldReverse,
-                shouldShowTwoColumns = isWideLayout,
-                onClick = { onRecordClick(it); focusRequester.freeFocus() },
-                onLongClick = {}
-            )
-            HorizontalSeparator()
+        if (shouldReverse) {
+            TextInputBar(requester, text, onTextSubmit, hasCopiedText, onPasteClick, closeAction)
         }
     }
 }
@@ -174,7 +169,7 @@ private fun TextInputBar(
     onTextSubmit: (String) -> Unit,
     hasCopiedText: Boolean,
     onPasteClick: () -> Unit,
-    onDownClick: () -> Unit
+    onDownClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -208,6 +203,9 @@ fun TextInput(
     state: MutableState<TextFieldValue>,
     onValueSubmit: (String) -> Unit,
 ) {
+    val scrollState = remember { androidx.compose.foundation.ScrollState(0) }
+    val coroutineScope = rememberCoroutineScope()
+
     Box(modifier = modifier.padding(start = 5.dp)) {
         BasicTextField(
             value = state.value,
@@ -215,6 +213,7 @@ fun TextInput(
             modifier = modifier
                 .fillMaxWidth()
                 .focusRequester(focusRequester)
+                .horizontalScroll(scrollState)
                 .onKeyEvent {
                     if (it.nativeKeyEvent.keyCode == KEYCODE_ENTER) {
                         onValueSubmit(state.value.text)
@@ -228,6 +227,9 @@ fun TextInput(
                         state.value = state.value.copy(
                             selection = TextRange(0, text.length)
                         )
+                        coroutineScope.launch {
+                            scrollState.scrollTo(scrollState.maxValue)
+                        }
                     }
                 },
             textStyle = TextStyle.Default.copy(color = MaterialTheme.colors.onBackground),
@@ -236,7 +238,7 @@ fun TextInput(
             keyboardOptions = KeyboardOptions(
                 imeAction = ImeAction.Search,
                 autoCorrect = false,
-                ),
+            ),
             keyboardActions = KeyboardActions(onSearch = { onValueSubmit(state.value.text) }),
         )
         if (state.value.text.isEmpty()) {

@@ -32,10 +32,7 @@ class ToolbarActionHandler(
         ToolbarAction.Translation -> browserController.showTranslationConfigDialog(true)
         ToolbarAction.NewTab -> IntentUnit.launchNewBrowser(activity, config.favoriteUrl)
         ToolbarAction.Tts ->
-            TtsSettingDialogFragment(
-                gotoSettingAction = { IntentUnit.gotoSystemTtsSettings(activity) },
-                showLocaleDialog = { browserController.showTtsLanguageDialog() }
-            ).show(activity.supportFragmentManager, "TtsSettingDialog")
+            TtsSettingDialogFragment().show(activity.supportFragmentManager, "TtsSettingDialog")
 
         ToolbarAction.Font -> browserController.toggleReaderMode()
         ToolbarAction.InputUrl -> {
@@ -80,7 +77,11 @@ class ToolbarActionHandler(
             "toolbar_config"
         )
 
+        ToolbarAction.Spacer1 -> {}
+        ToolbarAction.Spacer2 -> {}
+
         ToolbarAction.PageInfo -> {}
+        ToolbarAction.Time -> {}
 
         ToolbarAction.VerticalLayout -> browserController.toggleVerticalRead()
         ToolbarAction.ReaderMode -> browserController.toggleReaderMode()

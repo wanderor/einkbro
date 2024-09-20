@@ -40,7 +40,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.preference.toggle
-import info.plateaukao.einkbro.service.TtsManager
 import info.plateaukao.einkbro.view.compose.MyTheme
 import info.plateaukao.einkbro.view.dialog.compose.MenuItemType.AddToPocket
 import info.plateaukao.einkbro.view.dialog.compose.MenuItemType.CloseTab
@@ -54,14 +53,13 @@ import info.plateaukao.einkbro.view.dialog.compose.MenuItemType.SavePdf
 import info.plateaukao.einkbro.view.dialog.compose.MenuItemType.Settings
 import info.plateaukao.einkbro.view.dialog.compose.MenuItemType.ShareLink
 import info.plateaukao.einkbro.view.dialog.compose.MenuItemType.Shortcut
-import org.koin.android.ext.android.inject
 
 class MenuDialogFragment(
     private val url: String,
+    private val isSpeaking: Boolean,
     private val itemClicked: (MenuItemType) -> Unit,
     private val itemLongClicked: (MenuItemType) -> Unit,
 ) : ComposeDialogFragment() {
-    private val ttsManager: TtsManager by inject()
 
     override fun setupComposeView() = composeView.setContent {
         MyTheme {
@@ -69,7 +67,7 @@ class MenuDialogFragment(
                 config.whiteBackground(url),
                 config.boldFontStyle,
                 config.blackFontStyle,
-                ttsManager.isSpeaking(),
+                isSpeaking,
                 config.showShareSaveMenu,
                 config.showContentMenu,
                 config.hasInvertedColor(url),
@@ -277,7 +275,8 @@ private fun MenuItems(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 val ttsRes = if (isSpeaking) R.drawable.ic_stop else R.drawable.ic_tts
-                MenuItem(R.string.menu_tts, ttsRes) { onClicked(MenuItemType.Tts) }
+                MenuItem(R.string.menu_tts, ttsRes,
+                    onLongClicked = { onLongClicked(MenuItemType.Tts) }) { onClicked(MenuItemType.Tts) }
                 val invertRes =
                     if (hasInvertedColor) R.drawable.ic_invert_color_off else R.drawable.ic_invert_color
                 MenuItem(R.string.menu_invert_color, invertRes) {
@@ -351,7 +350,7 @@ private fun MenuItems(
                 R.string.menu_quickToggle,
                 R.drawable.ic_quick_toggle
             ) { onClicked(MenuItemType.QuickToggle) }
-            MenuItem(R.string.settings, R.drawable.icon_settings) { onClicked(Settings) }
+            MenuItem(R.string.settings, R.drawable.icon_settings, onLongClicked = { onLongClicked(Settings) }) { onClicked(Settings) }
         }
     }
 }
@@ -415,7 +414,7 @@ fun MenuItem(
     }
 }
 
-@Preview
+@Preview(showBackground = true)
 @Composable
 private fun PreviewItem() {
     MyTheme {
@@ -426,7 +425,7 @@ private fun PreviewItem() {
     }
 }
 
-@Preview
+@Preview(showBackground = true)
 @Composable
 private fun PreviewMenuItems() {
     MyTheme {

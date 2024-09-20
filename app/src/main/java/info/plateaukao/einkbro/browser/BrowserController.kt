@@ -8,6 +8,7 @@ import android.view.View
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient.CustomViewCallback
 import info.plateaukao.einkbro.preference.TranslationMode
+import info.plateaukao.einkbro.view.NinjaWebView
 import info.plateaukao.einkbro.viewmodel.TRANSLATE_API
 
 interface BrowserController {
@@ -17,6 +18,7 @@ interface BrowserController {
     fun isAtTop(): Boolean
     fun isCurrentAlbum(albumController: AlbumController): Boolean
     fun showAlbum(albumController: AlbumController)
+
     // showHomePage: true -> show home page if it's the last tab
     fun removeAlbum(albumController: AlbumController, showHomePage: Boolean = false)
     fun removeAlbum()
@@ -35,15 +37,18 @@ interface BrowserController {
     fun showTtsLanguageDialog()
     fun showFastToggleDialog()
     fun toggleSplitScreen(url: String? = null)
-    fun showTranslation()
+    fun showTranslation(webView: NinjaWebView? = null)
     fun saveBookmark(url: String? = null, title: String? = null)
     fun createShortcut()
     fun showSaveEpubDialog()
     fun showFontSizeChangeDialog()
     fun showSearchPanel()
     fun showWebArchiveFilePicker()
+    fun showOpenEpubFilePicker()
+
     //for tool bar long click
     fun openHistoryPage(amount: Int = 0)
+
     //
     fun showTranslationConfigDialog(translateDirectly: Boolean)
 
@@ -80,6 +85,11 @@ interface BrowserController {
     fun pageDown()
     fun pageUp()
     fun updatePageInfo(info: String)
+
+    fun sendPageUpKey()
+    fun sendPageDownKey()
+    fun sendLeftKey()
+    fun sendRightKey()
 
     fun addToPocket(url: String)
     fun handlePocketRequestToken(requestToken: String)

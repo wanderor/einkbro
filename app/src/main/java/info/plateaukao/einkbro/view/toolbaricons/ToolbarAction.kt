@@ -106,11 +106,35 @@ enum class ToolbarAction(
             R.drawable.ic_touch_direction_left,
             R.drawable.ic_touch_direction_right
         )
-    );
+    ),
+    Time(
+        iconResId = R.drawable.ic_history,
+        titleResId = R.string.toolbar_time,
+    ),
+    Spacer1(
+        iconResId = 0,
+        titleResId = R.string.expand_space,
+    ),
+    Spacer2(
+        iconResId = 0,
+        titleResId = R.string.expand_space,
+    ),
+    ;
 
 
     companion object {
         fun fromOrdinal(value: Int) = values().first { it.ordinal == value }
+        val defaultActionsForPhone: List<ToolbarAction> = listOf(
+            Bookmark,
+            TabCount,
+            InputUrl,
+            NewTab,
+            Back,
+            Refresh,
+            Touch,
+            ReaderMode,
+            Settings,
+        )
         val defaultActions: List<ToolbarAction> = listOf(
             Title,
             Bookmark,
@@ -141,7 +165,7 @@ data class IconActiveInfo(
 // a data class to wrap a state in it
 class ToolbarActionInfo(
     val toolbarAction: ToolbarAction,
-    var state: Boolean = false
+    var state: Boolean = false,
 ) {
     fun getCurrentResId(): Int = toolbarAction.getCurrentResId(state)
 }

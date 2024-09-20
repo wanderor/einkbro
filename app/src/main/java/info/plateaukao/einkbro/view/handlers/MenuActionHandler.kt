@@ -22,6 +22,7 @@ import info.plateaukao.einkbro.view.dialog.DialogManager
 import info.plateaukao.einkbro.view.dialog.ReceiveDataDialog
 import info.plateaukao.einkbro.view.dialog.compose.MenuItemType
 import info.plateaukao.einkbro.view.dialog.compose.ToolbarConfigDialogFragment
+import info.plateaukao.einkbro.view.dialog.compose.TtsSettingDialogFragment
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 
@@ -39,6 +40,10 @@ class MenuActionHandler(
             MenuItemType.SendLink -> browserController.toggleTextSearch()
             MenuItemType.TouchSetting -> browserController.toggleTouchPagination()
             MenuItemType.BoldFont -> browserController.showFontBoldnessDialog()
+            MenuItemType.Settings -> IntentUnit.gotoSettings(activity)
+            MenuItemType.Tts -> TtsSettingDialogFragment()
+                .show(activity.supportFragmentManager, "TtsSettingDialog")
+
             else -> Unit
         }
 
@@ -91,6 +96,7 @@ class MenuActionHandler(
                 val hasInvertedColor = config.toggleInvertedColor(ninjaWebView.url.orEmpty())
                 ViewUnit.invertColor(ninjaWebView, hasInvertedColor)
             }
+
             MenuItemType.WhiteBknd -> {
                 val isOn = config.toggleWhiteBackground(ninjaWebView.url.orEmpty())
                 if (isOn) ninjaWebView.updateCssStyle() else ninjaWebView.reload()
@@ -121,9 +127,12 @@ class MenuActionHandler(
     }
 
     private fun openSavedEpub() = if (config.savedEpubFileInfos.isEmpty()) {
-        NinjaToast.show(activity, "no saved epub!")
+        browserController.showOpenEpubFilePicker()
     } else {
-        dialogManager.showSaveEpubDialog(shouldAddNewEpub = false) { uri ->
+        dialogManager.showSaveEpubDialog(
+            showAddNewEpub = false,
+            openEpubAction = { browserController.showOpenEpubFilePicker() },
+        ) { uri ->
             HelperUnit.openFile(activity, uri ?: return@showSaveEpubDialog)
         }
     }
