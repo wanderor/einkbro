@@ -1210,7 +1210,7 @@ open class NinjaWebView(
 
 
         private const val readabilityOptions =
-            "{classesToPreserve: preservedClasses, overwriteImgSrc: true}"
+            "{classesToPreserve: preservedClasses}"
 
         private const val replaceWithReaderModeBodyJs = """
             var documentClone = document.cloneNode(true);
