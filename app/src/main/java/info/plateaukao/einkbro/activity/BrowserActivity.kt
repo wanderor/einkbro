@@ -373,14 +373,9 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 addAlbum(url = url, foreground = false)
             }
         }
-        val closeAlbums = { controllers: Set<AlbumController> ->
-            controllers.forEach { controller ->
-                removeAlbum(controller, false)
-            }
-        }
         baiduSyncer = BaiduSyncer(
-            this, mainContentLayout, browserContainer,
-            openUrls, closeAlbums, activityResultRegistry)
+            this, mainContentLayout, browserContainer, this,
+            openUrls, activityResultRegistry)
     }
 
     private fun initTtsViewModel() {
@@ -1828,6 +1823,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             this.albumTitle = title
             this.incognito = incognito
             setOnTouchListener(createMultiTouchTouchListener(this))
+            setOnPageFinishedAction { baiduSyncer.onPageFinished(this) }
         }
 
         maybeCreateNewPreloadWebView(enablePreloadWebView, newWebView)
@@ -1968,7 +1964,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     override fun removeAlbum(albumController: AlbumController, showHome: Boolean) {
         closeTabConfirmation {
             if (config.isSaveHistoryWhenClose()) {
-                addHistory(albumController.albumTitle, albumController.albumUrl)
+                addHistory(albumController.albumTitle, BaiduSyncer.normalizeUrl(albumController))
             }
 
             albumViewModel.removeAlbum(albumController.album)

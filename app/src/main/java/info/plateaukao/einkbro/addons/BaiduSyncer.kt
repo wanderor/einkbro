@@ -14,6 +14,7 @@ import com.google.gson.annotations.Expose
 import com.google.android.material.snackbar.Snackbar
 import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.browser.BrowserContainer
+import info.plateaukao.einkbro.browser.BrowserController
 import info.plateaukao.einkbro.view.NinjaWebView
 import kotlin.math.max
 import kotlin.math.min
@@ -93,20 +94,24 @@ private data class BaiduSyncerConfig(
     val receiving: Boolean = false,
     // Whether to preload inactive tabs in background.
     val preloading: Boolean = false,
-    // Maximum number of retries (besides initial attempt).
+    // Whether to cache waiting URLs in background.
+    val caching: Boolean = false,
+    // Maximal number of retries (besides initial attempt).
     val retries: Int = 0,
-    // Maximum number of URLs to open locally.
+    // Maximal number of URLs to open locally.
     val slots: Int = 20,
-    // Time to wait between opening URLs in seconds.
+    // Time to wait between loading URLs in seconds.
     val wait: Int = 15,
-    // Maximum number of recently closed URLs to be cached.
+    // Maximal number of recently closed URLs to be cached.
     val recents: Int = 200,
-    // Maximum duration in seconds for a closed URL to stay in cache.
+    // Maximal duration in seconds for a URL to stay in cache.
     val lifetime: Int = 7 * 86400,  // 7 days
     // Interval between heartbeats in seconds.
     val heartbeat: Int = 30,
     // Duration to display a message in seconds.
     val display: Int = 15,
+    // Regular expression pattern for URLs to preload in reader mode.
+    val reader: String = "",
     // For debugging release version.
     // Whether to turn on logging to external file.
     val logging: Boolean = false
@@ -148,8 +153,8 @@ class BaiduSyncer(
     _context: Context,
     _view: View,
     _browserContainer: BrowserContainer,
+    _browserController: BrowserController,
     _openUrls: (Set<String>) -> Unit,
-    _closeAlbums: (Set<AlbumController>) -> Unit,
     _registry: ActivityResultRegistry
 ) {
     companion object {
@@ -184,13 +189,17 @@ class BaiduSyncer(
             "/storage/emulated/0/Android/data/info.plateaukao.einkbro/files/baidu.log"
 
         // Normalizes the URL of an album controller for dedup.
-        private fun normalizeUrl(controller: AlbumController): String {
-            val url = controller.albumUrl.ifBlank { controller.initAlbumUrl }
+        public fun normalizeUrl(controller: AlbumController): String {
+            var url = controller.albumUrl
+            if (!url.startsWith("http")) {
+                url = controller.initAlbumUrl
+                if (!url.startsWith("http")) return ""
+            }
             return normalizeUrl(url)
         }
 
         // Normalizes a URL for dedup.
-        private fun normalizeUrl(url: String): String {
+        public fun normalizeUrl(url: String): String {
             // Removes hash.
             val pos = url.indexOf('#')
             if (pos > 0) {
@@ -202,7 +211,8 @@ class BaiduSyncer(
         // Checks whether a WebView instance is indeed loaded.
         private fun isLoaded(webView: NinjaWebView): Boolean {
             // TODO: add i18n support
-            return webView.album.isLoaded &&
+            return webView.album.isLoaded && webView.albumTitle.isNotBlank() &&
+                   webView.albumTitle != "..." &&
                    webView.albumTitle != "Webpage not available" &&
                    webView.albumTitle != "网页无法打开"
         }
@@ -212,12 +222,16 @@ class BaiduSyncer(
     private val context: Context = _context
     private val view: View = _view
     private val browserContainer: BrowserContainer = _browserContainer
+    private val browserController: BrowserController = _browserController
     private val openUrlsFunc: ((Set<String>) -> Unit) = _openUrls
-    private val closeAlbumsFunc: (Set<AlbumController>) -> Unit = _closeAlbums
     private val registry: ActivityResultRegistry = _registry
     private val handler: Handler = Handler(Looper.getMainLooper())
-    private val shared_preferences: SharedPreferences =
+
+    // For loading and persisting state.
+    private val sharedPreferences: SharedPreferences =
         _context.getSharedPreferences("baidu", Context.MODE_PRIVATE)
+    // For loading URLs in background, e.g. for caching.
+    private val headlessWebView: NinjaWebView = NinjaWebView(context, browserController)
 
     // Configuration.
     private var config: BaiduSyncerConfig = BaiduSyncerConfig()
@@ -237,6 +251,17 @@ class BaiduSyncer(
     private var writtenClosedUrls: Map<String, Long> = mapOf()
     // Cache of recently closed URLs in local device and seen in the cloud.
     private var recentUrls: MutableMap<String, Long> = mutableMapOf()
+    // Regular expression pattern of URLs to preload in reader mode
+    private var readerUrlRegex: Regex = Regex("")
+    // Regular expression pattern of URLs/paths for local cache.
+    // Note: must be synced with cacheUrl().
+    private val cacheRegex = Regex(""".*/cache-\d+\.mht""")
+    // (Multi-threaded) Mapping of URL to filename for locally cached URLs.
+    private var cachedUrls: MutableMap<String, Triple<String, String, Long>> = mutableMapOf()
+    // ID of the next cached URL.
+    private var nextCachedUrlId: Long = 0
+    // Recently adjusted URLs.
+    private var adjustedUrls = mutableSetOf<String>()
 
     // For launching File Chooser to pick a new config file to install.
     private var configLauncher: ActivityResultLauncher<Array<String>>? = null
@@ -260,6 +285,23 @@ class BaiduSyncer(
         var urlsToOpen: Set<String> = setOf(),
         var urlsToClose: Set<String> = setOf()
     )
+
+    public fun onPageFinished(webView: NinjaWebView) {
+        handler.postDelayed({
+            if (webView.albumUrl.startsWith("http")) {
+                if (isLoaded(webView)) {
+                    adjustReaderMode(webView, webView.albumUrl)
+                } else {
+                    loadUrlFromCache(webView, webView.albumUrl)
+                }
+            } else if (webView.albumUrl.startsWith("file")) {
+                if (cacheRegex.matches(webView.albumUrl)) {
+                    loadTitleFromCache(webView, webView.initAlbumUrl)
+                    adjustReaderMode(webView, webView.initAlbumUrl)
+                }
+            }
+        }, 2000)
+    }
 
     init {
         if (ALWAYS_EXTERNAL_LOGGING) {
@@ -356,16 +398,8 @@ class BaiduSyncer(
         }
 
         log("Starting")
-
-        // Loads certain pieces of data.
-        shared_preferences.getString("waitingUrls", null)?.let {
-            waitingUrls = Json.decodeFromString(it)
-            log("Loaded ${waitingUrls.size} waiting URLs")
-        }
-        shared_preferences.getString("recentUrls", null)?.let {
-            recentUrls = Json.decodeFromString(it)
-            log("Loaded ${recentUrls.size} recent URLs")
-        }
+        readerUrlRegex = Regex(config.reader)
+        loadState()
 
         // Initializes Retrofit.
         val gson = GsonBuilder().excludeFieldsWithoutExposeAnnotation().create()
@@ -389,11 +423,40 @@ class BaiduSyncer(
 
     private fun heartbeat() {
         val now = Date().time
-        if (now >= lastActionTime + config.interval * 1000L) {
-            lastActionTime = now  // update even if action fails
-            sync(now)
-            preload()
+        if (now < lastActionTime + config.interval * 1000L) return
+        lastActionTime = now  // update even if action fails
+
+        adjustedUrls.clear()  // prevent memory growth
+
+        sync(now)
+        cache(now)
+        preload()
+        saveState()
+    }
+
+    // Loads state.
+    private fun loadState() {
+        sharedPreferences.getString("waitingUrls", null)?.let {
+            waitingUrls = Json.decodeFromString(it)
         }
+        sharedPreferences.getString("recentUrls", null)?.let {
+            recentUrls = Json.decodeFromString(it)
+        }
+        sharedPreferences.getString("cachedUrls", null)?.let {
+            cachedUrls = Json.decodeFromString(it)
+        }
+        nextCachedUrlId = sharedPreferences.getLong("nextCachedUrlId", 0)
+        log("Loaded: ${waitingUrls.size} waiting, ${recentUrls.size} recent, ${cachedUrls.size} cached")
+    }
+
+    // Persists state.
+    private fun saveState() {
+        val editor = sharedPreferences.edit()
+        editor.putString("waitingUrls", Json.encodeToString(waitingUrls))
+        editor.putString("recentUrls", Json.encodeToString(recentUrls))
+        editor.putString("cachedUrls", Json.encodeToString(cachedUrls))
+        editor.putLong("nextCachedUrlId", nextCachedUrlId)
+        editor.apply()
     }
 
     // Synchronizes between local and cloud.
@@ -462,7 +525,7 @@ class BaiduSyncer(
             }
         }
 
-        // Open and close URLs.
+        // Opens and closes URLs.
         if (urlsToOpenFirst.isNotEmpty()) {
             openUrls(urlsToOpenFirst)
         }
@@ -483,12 +546,6 @@ class BaiduSyncer(
         } else if (waitingUrls.isNotEmpty()) {
             display("${waitingUrls.size} waiting")
         }
-
-        // Persists certain pieces of data.
-        val editor = shared_preferences.edit()
-        editor.putString("waitingUrls", Json.encodeToString(waitingUrls))
-        editor.putString("recentUrls", Json.encodeToString(recentUrls))
-        editor.apply()
     }
 
     // Cleans cache of recently closed URLs. Removes obsolete URLs and limit cache size.
@@ -655,21 +712,93 @@ class BaiduSyncer(
         return null
     }
 
-    // Preload inactive tabs in background.
+    // Cache URLs in background.
+    private fun cache(now: Long) {
+        if (!config.caching) return
+
+        val seen = mutableSetOf<String>()
+        // Note: each time we only attempt to cache a few URLs, so that the total time spent and
+        // the risk of interruption is acceptable. We also shuffle the URLs to avoid being blocked
+        // on the same URLs.
+        val urls = prevUrls.toList() + waitingUrls.shuffled()
+        val attempted = runAndWait(period = config.wait * 1000L, max = config.slots) {
+            var result = Pair(true, 0)
+            for (url in urls) {
+                if (!shouldCacheUrl(url, seen)) continue
+                cacheUrl(url, now)
+                result = Pair(false, 1)
+                break
+            }
+            result
+        }
+
+        val purged = cleanCachedUrls(now)
+        if (attempted > 0 || purged > 0) {
+            val total = synchronized(cachedUrls) { cachedUrls.size }
+            display("Cache: $total total, $attempted attempted, $purged purged")
+        }
+    }
+
+    // Whether to cache the URL or skip it.
+    private fun shouldCacheUrl(url: String, seen: MutableSet<String>): Boolean {
+        if (url in seen) return false
+        seen.add(url)
+        synchronized(cachedUrls) {
+            if (url in cachedUrls) return false
+        }
+        return true
+    }
+
+    // Caches the URL to a local file.
+    private fun cacheUrl(url: String, now: Long) {
+        context.externalCacheDir?.let {
+            // Note: filename pattern must be synced with cacheRegex.
+            val path = it.path + "/cache-" + nextCachedUrlId++ + ".mht"
+            log(Log.DEBUG, "Caching $url to $path")
+            headlessWebView.setOnPageFinishedAction {
+                if (isLoaded(headlessWebView)) {
+                    val title = headlessWebView.albumTitle
+                    headlessWebView.saveWebArchive(path, false) {
+                        synchronized(cachedUrls) {
+                            cachedUrls[url] = Triple(path, title, now)
+                        }
+                    }
+                }
+            }
+            headlessWebView.loadUrl(url)
+        }
+    }
+
+    // Cleans cache of recently closed URLs. Removes obsolete URLs and limit cache size.
+    private fun cleanCachedUrls(now: Long): Int {
+        var count = 0
+        cachedUrls = cachedUrls.filterValues {
+            now - it.third < config.lifetime * 1000L
+        }.toMutableMap()
+        context.getExternalFilesDir(null)?.let { dir ->
+            val cachedPaths = cachedUrls.map { it.value.first }.toSet()
+            dir.listFiles()?.filter { cacheRegex.matches(it.path) && !cachedPaths.contains(it.path) }
+                ?.map {
+                    log(Log.DEBUG, "Deleting cache file: ${it.path}")
+                    it.delete()
+                    ++count
+                }
+        }
+        return count
+    }
+
+    // Preloads inactive tabs in background.
     private fun preload() {
         if (!config.preloading) return
 
-        var seen = mutableSetOf<Pair<NinjaWebView, String>>()
-        val total = runAndWait(period = config.wait * 1000L, repeated = true) {
+        val seen = mutableSetOf<Pair<NinjaWebView, String>>()
+        val total = runAndWait(period = config.wait * 1000L, max = Int.MAX_VALUE) {
             var result = Pair(true, 0)
             for (controller in browserContainer.list().take(config.slots)) {
                 val webView = controller as NinjaWebView
-                val key = Pair(webView, webView.initAlbumUrl)
-                if (key in seen) continue
-                seen.add(key)
-                if (isLoaded(webView) || webView.initAlbumUrl.isEmpty()) continue
-                log(Log.DEBUG, "Preloading ${webView.initAlbumUrl}")
-                webView.loadUrl(webView.initAlbumUrl)
+                val url = webView.initAlbumUrl
+                if (!shouldPreloadUrl(webView, url, seen)) continue
+                preloadUrl(webView, url)
                 result = Pair(false, 1)
                 break
             }
@@ -678,7 +807,57 @@ class BaiduSyncer(
         log("Preloaded $total inactive tabs")
     }
 
-    // List normalized URLs of the currently open web pages in the local browser.
+    // Whether to preload the URL or skip it.
+    private fun shouldPreloadUrl(
+        webView: NinjaWebView,
+        url: String,
+        seen: MutableSet<Pair<NinjaWebView, String>>
+    ): Boolean {
+        val key = Pair(webView, url)
+        if (key in seen) return false
+        seen.add(key)
+        if (isLoaded(webView) || url.isEmpty()) return false
+        return true
+    }
+
+    // Preloads the URL in the specified WebView.
+    private fun preloadUrl(webView: NinjaWebView, url: String) {
+        log(Log.DEBUG, "Preloading $url")
+        //webView.setOnPageFinishedAction { onPageFinished(webView) }
+        webView.loadUrl(url)
+    }
+
+    // Load URL from local cache if available.
+    private fun loadUrlFromCache(webView: NinjaWebView, url: String) {
+        val path = synchronized(cachedUrls) {
+            cachedUrls[url]?.first ?: ""
+        }
+        if (path.isBlank() || !File(path).exists()) return
+        log(Log.DEBUG, "Loading $url from cache: $path")
+        webView.initAlbumUrl = url
+        webView.loadUrl("file://$path")
+    }
+
+    // Load page title from local cache if available.
+    private fun loadTitleFromCache(webView: NinjaWebView, url: String) {
+        val title = synchronized(cachedUrls) {
+            cachedUrls[url]?.second ?: ""
+        }
+        if (title.isBlank()) return
+        webView.albumTitle = title
+    }
+
+    // Enter or exit reader mode as appropriate.
+    private fun adjustReaderMode(webView: NinjaWebView, url: String) {
+        if (!adjustedUrls.contains(url) &&
+            readerUrlRegex.matches(url) != webView.isReaderModeOn) {
+            log(Log.DEBUG, "Toggling reader mode from ${webView.isReaderModeOn} for $url")
+            webView.toggleReaderMode()
+            adjustedUrls.add(url)
+        }
+    }
+
+    // Lists normalized URLs of the currently open web pages in the local browser.
     private fun listUrls(): Set<String> {
         lateinit var result: Set<String>
         runAndWait(period = 1000) {
@@ -686,8 +865,7 @@ class BaiduSyncer(
             val urls = controllers
                 .filter { !it.isTranslatePage }
                 .map { normalizeUrl(it) }
-                .filter { !it.startsWith("data") }
-                .filter { it.isNotBlank() && it != "about:blank" }
+                .filter { it.startsWith("http") }
                 .toSet()
             log("Listed ${urls.size} URLs from ${controllers.size} tabs")
             result = urls
@@ -696,31 +874,31 @@ class BaiduSyncer(
         return result
     }
 
-    // Run an action and wait for its completion.
-    //
-    // `action` function should return a pair:
+    // Runs an action and waits for its completion.
+    // `period`: period to wait in each round in milliseconds.
+    // `max`: maximal accumulated progress, or 0 to run once only.
+    // `action`: function to run in each round. It should return a pair:
     // - `done`: (Boolean) Whether to end the repeated action.
     // - `progress`: (Int) this function accumulates this value and returns the sum.
     // Return: accumulated sum of `progress` values.
-    private fun runAndWait(period: Long,
-                           repeated: Boolean = false,
+    private fun runAndWait(period: Long, max: Int = 0,
                            action: () -> Pair<Boolean, Int>): Int {
         val lock = Object()
         var done = false
         var total = 0
 
-        var actionPosted = false
+        var firstRun = true
         var loopDone = false
         while (!loopDone) {
-            if (repeated || !actionPosted) {
+            if (total < max || firstRun) {
                 handler.post {
                     val result = action()
                     synchronized(lock) {
                         total += result.second
-                        if (!repeated || result.first) { done = true }
+                        if (total >= max || result.first) { done = true }
                     }
                 }
-                actionPosted = true
+                firstRun = false
             }
             Thread.sleep(period)
             synchronized(lock) { loopDone = done }
@@ -747,7 +925,9 @@ class BaiduSyncer(
                 .filter { !it.isTranslatePage }
                 .filter { urls.contains(normalizeUrl(it)) }
                 .toSet()
-            closeAlbumsFunc(controllers)
+            controllers.forEach {
+                browserController.removeAlbum(it, false)
+            }
         }
     }
 
