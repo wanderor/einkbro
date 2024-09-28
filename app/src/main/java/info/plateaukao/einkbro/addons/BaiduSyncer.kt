@@ -222,16 +222,20 @@ class BaiduSyncer(
                    webView.albumTitle != "网页无法打开"
         }
 
-        fun isOffline(context: Context, message: StringBuilder? = null): Boolean {
+        fun isOffline(context: Context, transports: MutableList<String>? = null): Boolean {
+            var result = true
             val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            manager.getNetworkCapabilities(manager.activeNetwork)?.let {
-                val mobile = it.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-                val wifi = it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-                val eth = it.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
-                message?.append("mobile=$mobile wifi=$wifi eth=$eth")
-                if (mobile || wifi || eth) return false
+            manager.getNetworkCapabilities(manager.activeNetwork)?.let { capabilities ->
+                mapOf("mobile" to NetworkCapabilities.TRANSPORT_CELLULAR,
+                      "wifi" to NetworkCapabilities.TRANSPORT_WIFI,
+                      "ethernet" to NetworkCapabilities.TRANSPORT_ETHERNET).forEach { name, type ->
+                    if (capabilities.hasTransport(type)) {
+                        transports?.add(name)
+                        result = false
+                    }
+                }
             }
-            return true
+            return result
         }
 
         fun chain(view: View, steps: Iterable<Pair<() -> Unit, Long>>) {
@@ -464,11 +468,11 @@ class BaiduSyncer(
 
     private fun heartbeat() {
         val prevOffline = offline
-        val message = StringBuilder()
-        offline = isOffline(context, message)
+        val transports = mutableListOf<String>()
+        offline = isOffline(context, transports)
         if (offline != prevOffline) {
-            val status = if (offline) "offline" else "online"
-            display("Network change: [$status] $message")
+            val status = if (offline) "offline" else "online [${transports.joinToString()}]"
+            display("Network change: $status")
         }
 
         val now = Date().time
