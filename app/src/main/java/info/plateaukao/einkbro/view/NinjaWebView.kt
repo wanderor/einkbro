@@ -141,10 +141,20 @@ open class NinjaWebView(
             .replace("fontfamily", "fontfamily${fontNum}")
     }
 
-    override fun reload() {
+    private fun resetState(partial: Boolean = false) {
+        dualCaption = null
         isTranslatePage = false
-        isVerticalRead = false
-        isReaderModeOn = false
+        isTranslateByParagraph = false
+        browserController?.resetTranslateUI()
+
+        if (!partial) {
+            isVerticalRead = false
+            isReaderModeOn = false
+        }
+    }
+
+    override fun reload() {
+        resetState()
         settings.textZoom = config.fontSize
         settings.cacheMode = WebSettings.LOAD_DEFAULT
         super.reload()
@@ -155,9 +165,7 @@ open class NinjaWebView(
     }
 
     override fun goBack() {
-        isTranslatePage = false
-        isVerticalRead = false
-        isReaderModeOn = false
+        resetState()
         settings.textZoom = config.fontSize
         super.goBack()
     }
@@ -335,10 +343,7 @@ open class NinjaWebView(
             return
         }
 
-        dualCaption = null
-        isTranslatePage = false
-        isTranslateByParagraph = false
-        browserController?.resetTranslateUI()
+        resetState()
 
         bookmarkManager.findFaviconBy(url)?.getBitmap()?.let {
             setAlbumCover(it)
@@ -352,15 +357,12 @@ open class NinjaWebView(
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun loadUrl(url: String) {
-        dualCaption = null
         album.isLoaded = true
 
-        isTranslatePage = false
-        isTranslateByParagraph = false
-        browserController?.resetTranslateUI()
+        val partial = url.startsWith("javascript:") || url.startsWith("content:")
+        resetState(partial)
 
-        if (url.startsWith("javascript:") || url.startsWith("content:")) {
-            // Daniel
+        if (partial) {  // Daniel
             super.loadUrl(url)
             return
         }
@@ -1178,7 +1180,7 @@ open class NinjaWebView(
                 //console.log("Element ID:", elementId, "Response string:", responseString);
                 node = document.getElementById(elementId).nextElementSibling;
                 node.textContent = responseString;
-                node.style = "border: 1px dashed lightgray; padding: 5px; display: inline-block"
+                node.style = "border: 1px dashed lightgray; padding: 5px; display: inline-block; line-height: 1.5;"
             }
             
             // Create a new IntersectionObserver object

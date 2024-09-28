@@ -21,9 +21,43 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Article
+import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
+import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.automirrored.outlined.SendToMobile
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.outlined.AddHome
+import androidx.compose.material.icons.outlined.AddLink
+import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.BookmarkAdd
+import androidx.compose.material.icons.outlined.BorderColor
+import androidx.compose.material.icons.outlined.CancelPresentation
+import androidx.compose.material.icons.outlined.CopyAll
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.FormatSize
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.InstallMobile
+import androidx.compose.material.icons.outlined.InvertColors
+import androidx.compose.material.icons.outlined.InvertColorsOff
+import androidx.compose.material.icons.outlined.PictureAsPdf
+import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SettingsSuggest
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Straighten
+import androidx.compose.material.icons.outlined.TouchApp
+import androidx.compose.material.icons.outlined.Translate
+import androidx.compose.material.icons.outlined.ViewColumn
+import androidx.compose.material.icons.outlined.ViewStream
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +65,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -114,6 +149,7 @@ private fun MenuItems(
     Column(
         modifier = Modifier
             .wrapContentHeight()
+            .verticalScroll(rememberScrollState())
             .width(IntrinsicSize.Max),
         horizontalAlignment = Alignment.End
     ) {
@@ -126,14 +162,13 @@ private fun MenuItems(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            MenuItem(
-                R.string.menu_highlights,
-                R.drawable.ic_highlight
-            ) { onClicked(MenuItemType.Highlights) }
-            MenuItem(R.string.menu_fav, R.drawable.ic_home_set) { onClicked(MenuItemType.SetHome) }
-            MenuItem(R.string.menu_openFav, R.drawable.ic_home) { onClicked(OpenHome) }
-            MenuItem(R.string.menu_closeTab, R.drawable.icon_close) { onClicked(CloseTab) }
-            MenuItem(R.string.menu_quit, R.drawable.icon_exit) { onClicked(Quit) }
+            MenuItem(R.string.menu_highlights, 0, Icons.Outlined.BorderColor) {
+                onClicked(MenuItemType.Highlights)
+            }
+            MenuItem(R.string.menu_fav, 0, Icons.Outlined.AddHome) { onClicked(MenuItemType.SetHome) }
+            MenuItem(R.string.menu_openFav, 0, Icons.Outlined.Home) { onClicked(OpenHome) }
+            MenuItem(R.string.menu_closeTab, 0, Icons.Outlined.CancelPresentation) { onClicked(CloseTab) }
+            MenuItem(R.string.menu_quit, 0, Icons.AutoMirrored.Outlined.Logout) { onClicked(Quit) }
         }
         HorizontalSeparator()
         Text(
@@ -158,20 +193,17 @@ private fun MenuItems(
             ) {
                 MenuItem(
                     R.string.menu_receive,
-                    R.drawable.ic_receive,
+                    Icons.Outlined.InstallMobile,
                     onLongClicked = { onLongClicked(MenuItemType.ReceiveData) },
                 ) { onClicked(MenuItemType.ReceiveData) }
                 MenuItem(
                     R.string.menu_save_bookmark,
-                    R.drawable.ic_bookmark
+                    Icons.Outlined.BookmarkAdd
                 ) { onClicked(MenuItemType.SaveBookmark) }
-                MenuItem(R.string.menu_sc, R.drawable.link_plus) { onClicked(Shortcut) }
-                MenuItem(R.string.menu_open_with, R.drawable.icon_exit) { onClicked(OpenWith) }
-                MenuItem(R.string.copy_link, R.drawable.ic_copy) { onClicked(CopyLink) }
-                MenuItem(
-                    R.string.menu_share_link,
-                    R.drawable.icon_menu_share
-                ) { onClicked(ShareLink) }
+                MenuItem(R.string.menu_sc, 0, Icons.Outlined.AddLink) { onClicked(Shortcut) }
+                MenuItem(R.string.menu_open_with, 0, Icons.Outlined.Apps) { onClicked(OpenWith) }
+                MenuItem(R.string.copy_link, 0, Icons.Outlined.CopyAll) { onClicked(CopyLink) }
+                MenuItem(R.string.menu_share_link, 0, Icons.Outlined.Share) { onClicked(ShareLink) }
             }
             Row(
                 modifier = Modifier
@@ -181,21 +213,21 @@ private fun MenuItems(
             ) {
                 MenuItem(
                     R.string.menu_send_link,
-                    R.drawable.ic_send,
+                    Icons.AutoMirrored.Outlined.SendToMobile,
                     onLongClicked = { onLongClicked(MenuItemType.SendLink) },
                 ) { onClicked(MenuItemType.SendLink) }
                 MenuItem(
                     R.string.menu_add_to_pocket,
                     R.drawable.ic_pocket
                 ) { onClicked(AddToPocket) }
-                MenuItem(R.string.menu_save_archive, R.drawable.ic_save_archive) {
+                MenuItem(R.string.menu_save_archive, 0, Icons.Outlined.Save) {
                     onClicked(
                         MenuItemType.SaveArchive
                     )
                 }
-                MenuItem(R.string.menu_open_epub, R.drawable.ic_open_epub) { onClicked(OpenEpub) }
-                MenuItem(R.string.menu_save_epub, R.drawable.ic_book) { onClicked(SaveEpub) }
-                MenuItem(R.string.menu_save_pdf, R.drawable.ic_pdf) { onClicked(SavePdf) }
+                MenuItem(R.string.menu_open_epub, Icons.AutoMirrored.Outlined.LibraryBooks) { onClicked(OpenEpub) }
+                MenuItem(R.string.menu_save_epub, Icons.AutoMirrored.Outlined.Article) { onClicked(SaveEpub) }
+                MenuItem(R.string.menu_save_pdf, Icons.Outlined.PictureAsPdf) { onClicked(SavePdf) }
             }
         } else {
             Row(
@@ -243,24 +275,24 @@ private fun MenuItems(
             ) {
                 MenuItem(
                     R.string.split_screen,
-                    R.drawable.ic_split_screen
+                    Icons.Outlined.ViewStream,
                 ) { onClicked(MenuItemType.SplitScreen) }
                 MenuItem(
                     R.string.translate,
-                    R.drawable.ic_translate,
+                    Icons.Outlined.Translate,
                     onLongClicked = { onLongClicked(MenuItemType.Translate) },
                 ) { onClicked(MenuItemType.Translate) }
                 MenuItem(
                     R.string.vertical_read,
-                    R.drawable.ic_vertical_read
+                    Icons.Outlined.ViewColumn,
                 ) { onClicked(MenuItemType.VerticalRead) }
                 MenuItem(
                     R.string.reader_mode,
-                    R.drawable.ic_reader
+                    Icons.AutoMirrored.Outlined.ChromeReaderMode,
                 ) { onClicked(MenuItemType.ReaderMode) }
                 MenuItem(
                     R.string.touch_area_setting,
-                    R.drawable.ic_touch_disabled,
+                    Icons.Outlined.TouchApp,
                     onLongClicked = { onLongClicked(MenuItemType.TouchSetting) },
                 ) {
                     onClicked(
@@ -274,11 +306,11 @@ private fun MenuItems(
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                val ttsRes = if (isSpeaking) R.drawable.ic_tts else R.drawable.ic_voice_off
+                val ttsRes = if (isSpeaking) Icons.Filled.RecordVoiceOver else Icons.Outlined.RecordVoiceOver
                 MenuItem(R.string.menu_tts, ttsRes,
                     onLongClicked = { onLongClicked(MenuItemType.Tts) }) { onClicked(MenuItemType.Tts) }
                 val invertRes =
-                    if (hasInvertedColor) R.drawable.ic_invert_color_off else R.drawable.ic_invert_color
+                    if (hasInvertedColor) Icons.Outlined.InvertColorsOff else Icons.Outlined.InvertColors
                 MenuItem(R.string.menu_invert_color, invertRes) {
                     onClicked(MenuItemType.InvertColor)
                 }
@@ -295,7 +327,7 @@ private fun MenuItems(
                 ) { onClicked(MenuItemType.BoldFont) }
                 MenuItem(
                     R.string.font_size,
-                    R.drawable.icon_size
+                    Icons.Outlined.FormatSize
                 ) { onClicked(MenuItemType.FontSize) }
             }
         } else {
@@ -307,12 +339,12 @@ private fun MenuItems(
             ) {
                 MenuItem(
                     R.string.translate,
-                    R.drawable.ic_translate,
+                    Icons.Outlined.Translate,
                     onLongClicked = { onLongClicked(MenuItemType.Translate) },
                 ) { onClicked(MenuItemType.Translate) }
                 MenuItem(
                     R.string.reader_mode,
-                    R.drawable.ic_reader
+                    Icons.AutoMirrored.Outlined.ChromeReaderMode
                 ) { onClicked(MenuItemType.ReaderMode) }
                 val whiteRes =
                     if (hasWhiteBkd) R.drawable.ic_white_background_active else R.drawable.ic_white_background
@@ -322,7 +354,7 @@ private fun MenuItems(
                 MenuItem(R.string.bold_font, boldRes) { onClicked(MenuItemType.BoldFont) }
                 MenuItem(
                     R.string.menu_expand_menu,
-                    R.drawable.icon_arrow_right_gest,
+                    Icons.AutoMirrored.Outlined.KeyboardArrowRight,
                 ) { currentShowContent = true; toggleContentMenu() }
             }
         }
@@ -333,26 +365,49 @@ private fun MenuItems(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            MenuItem(R.string.menu_other_searchSite, R.drawable.icon_search) {
+            MenuItem(R.string.menu_other_searchSite, Icons.Outlined.Search) {
                 onClicked(
                     MenuItemType.Search
                 )
             }
             MenuItem(
                 R.string.menu_download,
-                R.drawable.icon_download
+                Icons.Outlined.Download
             ) { onClicked(MenuItemType.Download) }
             MenuItem(
-                R.string.toolbar_setting,
-                R.drawable.ic_toolbar
+                R.string.toolbar_icons,
+                Icons.Outlined.Straighten
             ) { onClicked(MenuItemType.ToolbarSetting) }
             MenuItem(
                 R.string.menu_quickToggle,
-                R.drawable.ic_quick_toggle
+                Icons.Outlined.SettingsSuggest,
             ) { onClicked(MenuItemType.QuickToggle) }
-            MenuItem(R.string.settings, R.drawable.icon_settings, onLongClicked = { onLongClicked(Settings) }) { onClicked(Settings) }
+            MenuItem(
+                R.string.settings,
+                Icons.Outlined.Settings,
+                onLongClicked = { onLongClicked(Settings) }) { onClicked(Settings) }
         }
     }
+}
+
+@Composable
+fun MenuItem(
+    titleResId: Int,
+    imageVector: ImageVector,
+    isLargeType: Boolean = false,
+    showIcon: Boolean = true,
+    onLongClicked: () -> Unit = {},
+    onClicked: () -> Unit = {},
+) {
+    MenuItem(
+        titleResId,
+        0,
+        imageVector,
+        isLargeType,
+        showIcon,
+        onLongClicked,
+        onClicked,
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -360,6 +415,7 @@ private fun MenuItems(
 fun MenuItem(
     titleResId: Int,
     iconResId: Int,
+    imageVector: ImageVector? = null,
     isLargeType: Boolean = false,
     showIcon: Boolean = true,
     onLongClicked: () -> Unit = {},
@@ -392,13 +448,23 @@ fun MenuItem(
         verticalArrangement = if (!showIcon) Arrangement.Center else Arrangement.Top
     ) {
         if (showIcon) {
-            Icon(
-                painter = painterResource(id = iconResId), contentDescription = null,
-                modifier = Modifier
-                    .size(if (isLargeType) 55.dp else 44.dp)
-                    .padding(horizontal = 6.dp),
-                tint = MaterialTheme.colors.onBackground
-            )
+            if (imageVector != null) {
+                Icon(
+                    imageVector = imageVector, contentDescription = null,
+                    modifier = Modifier
+                        .size(if (isLargeType) 55.dp else 44.dp)
+                        .padding(horizontal = 6.dp),
+                    tint = MaterialTheme.colors.onBackground
+                )
+            } else {
+                Icon(
+                    painter = painterResource(id = iconResId), contentDescription = null,
+                    modifier = Modifier
+                        .size(if (isLargeType) 55.dp else 44.dp)
+                        .padding(horizontal = 6.dp),
+                    tint = MaterialTheme.colors.onBackground
+                )
+            }
         }
         Text(
             modifier = Modifier
