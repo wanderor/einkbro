@@ -2,6 +2,8 @@ package info.plateaukao.einkbro.addons
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -188,6 +190,9 @@ class BaiduSyncer(
         private const val EXTERNAL_LOG_PATH: String =
             "/storage/emulated/0/Android/data/info.plateaukao.einkbro/files/baidu.log"
 
+        // Maximal number of recently worked URLs to temporarily keep.
+        private const val MAX_RECENTLY_WORKED_URLS: Int = 1000
+
         // Normalizes the URL of an album controller for dedup.
         public fun normalizeUrl(controller: AlbumController): String {
             var url = controller.albumUrl
@@ -216,6 +221,38 @@ class BaiduSyncer(
                    webView.albumTitle != "Webpage not available" &&
                    webView.albumTitle != "网页无法打开"
         }
+
+        fun isOffline(context: Context, message: StringBuilder? = null): Boolean {
+            val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            manager.getNetworkCapabilities(manager.activeNetwork)?.let {
+                val mobile = it.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+                val wifi = it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                val eth = it.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                message?.append("mobile=$mobile wifi=$wifi eth=$eth")
+                if (mobile || wifi || eth) return false
+            }
+            return true
+        }
+
+        fun chain(view: View, steps: Iterable<Pair<() -> Unit, Long>>) {
+            fun proceed(iterator: Iterator<Pair<() -> Unit, Long>>) {
+                if (!iterator.hasNext()) return
+                val pair = iterator.next()
+                view.postDelayed({
+                    (pair.first)()
+                    proceed(iterator)
+                }, pair.second)
+            }
+            proceed(steps.iterator())
+        }
+
+        fun chain(view: View, interval: Long, steps: Iterable<() -> Unit>) {
+            val iterator = steps.iterator()
+            val pairs = generateSequence {
+                if (iterator.hasNext()) Pair(iterator.next(), interval) else null
+            }
+            chain(view, pairs.asIterable())
+        }
     }
 
     // For GUI interactions.
@@ -235,8 +272,9 @@ class BaiduSyncer(
 
     // Configuration.
     private var config: BaiduSyncerConfig = BaiduSyncerConfig()
-    // Timestamp of the last action.
-    private var lastActionTime: Long = 0
+    // Timestamp of the last actions.
+    private var lastSyncTime: Long = 0
+    private var lastDisplayTime: Long = 0
     // We check 2 timestamps when reading from the cloud:
     // - cloud file mtime.
     // - timestamp string written in the file.
@@ -256,17 +294,21 @@ class BaiduSyncer(
     // Regular expression pattern of URLs/paths for local cache.
     // Note: must be synced with cacheUrl().
     private val cacheRegex = Regex(""".*/cache-\d+\.mht""")
-    // (Multi-threaded) Mapping of URL to filename for locally cached URLs.
+    // (Multi-threaded) Mapping of URL to (path, title, timestamp) for locally cached URLs.
     private var cachedUrls: MutableMap<String, Triple<String, String, Long>> = mutableMapOf()
     // ID of the next cached URL.
     private var nextCachedUrlId: Long = 0
-    // Recently adjusted URLs.
-    private var adjustedUrls = mutableSetOf<String>()
+    // Whether the previous caching operation has finished all pages.
+    private var cacheDone: Boolean = false
+    // URLs that we recently worked on and should avoid duplicate work.
+    private var recentlyCachedUrls: MutableSet<String> = mutableSetOf()
+    private var recentlyAdjustedUrls: MutableSet<String> = mutableSetOf()
+    private var offline: Boolean = false
+    // For logging to external file in local device.
+    private var externalLogFile: File? = null
 
     // For launching File Chooser to pick a new config file to install.
     private var configLauncher: ActivityResultLauncher<Array<String>>? = null
-    // For logging to external file in local device.
-    private var external_log_file: File? = null
 
     // Retrofit.
     private lateinit var retrofit: Retrofit
@@ -305,7 +347,7 @@ class BaiduSyncer(
 
     init {
         if (ALWAYS_EXTERNAL_LOGGING) {
-            external_log_file = File(EXTERNAL_LOG_PATH)
+            externalLogFile = File(EXTERNAL_LOG_PATH)
         }
 
         log("Initializing BaiduSyncer")
@@ -393,13 +435,14 @@ class BaiduSyncer(
     // Starts periodic sync.
     // Precondition: configuration is ready.
     private fun start() {
-        if (external_log_file == null && config.logging) {
-            external_log_file = File(EXTERNAL_LOG_PATH)
+        if (externalLogFile == null && config.logging) {
+            externalLogFile = File(EXTERNAL_LOG_PATH)
         }
 
         log("Starting")
         readerUrlRegex = Regex(config.reader)
         loadState()
+        updateCachePages()
 
         // Initializes Retrofit.
         val gson = GsonBuilder().excludeFieldsWithoutExposeAnnotation().create()
@@ -410,9 +453,7 @@ class BaiduSyncer(
         service = retrofit.create(BaiduCloudService::class.java)
 
         // Starts timer for periodical sync.
-        val delay = 1000L * config.startup
-        val period = 1000L * config.heartbeat
-        timer(daemon = true, initialDelay = delay, period = period) {
+        timer(daemon = true, initialDelay = config.startup * 1000L, period = config.heartbeat * 1000L) {
             try {
                 heartbeat()
             } catch (e: Exception) {
@@ -422,16 +463,34 @@ class BaiduSyncer(
     }
 
     private fun heartbeat() {
+        val prevOffline = offline
+        val message = StringBuilder()
+        offline = isOffline(context, message)
+        if (offline != prevOffline) {
+            val status = if (offline) "offline" else "online"
+            display("Network change: [$status] $message")
+        }
+
         val now = Date().time
-        if (now < lastActionTime + config.interval * 1000L) return
-        lastActionTime = now  // update even if action fails
+        var shortcut = offline
+        var backfilling = true
+        var caching = !offline
+        if (now >= lastSyncTime + config.interval * 1000L) {  // full path
+            lastSyncTime = now  // update even if action fails
+            // Note: prevent infinite memory growth.
+            if (recentlyCachedUrls.size > MAX_RECENTLY_WORKED_URLS) recentlyCachedUrls.clear()
+            if (recentlyAdjustedUrls.size > MAX_RECENTLY_WORKED_URLS) recentlyAdjustedUrls.clear()
+        } else {  // shortcut path
+            shortcut = true
+            // Note: theoretically we shouldn't call size() here in timer thread
+            backfilling = (browserContainer.size() < config.slots * .7 && waitingUrls.isNotEmpty())
+            caching = (!cacheDone && !offline)
+        }
 
-        adjustedUrls.clear()  // prevent memory growth
-
-        sync(now)
-        cache(now)
-        preload()
-        saveState()
+        if (backfilling) sync(now, shortcut)
+        if (caching) cache(now)
+        if (backfilling) preload(offline)
+        if (backfilling || caching) saveState()
     }
 
     // Loads state.
@@ -460,7 +519,7 @@ class BaiduSyncer(
     }
 
     // Synchronizes between local and cloud.
-    private fun sync(now: Long) {
+    private fun sync(now: Long, shortcut: Boolean) {
         log("Sync started: sending=${config.sending}, receiving=${config.receiving}")
 
         // Gathers local information.
@@ -478,7 +537,7 @@ class BaiduSyncer(
 
         // Sync: cloud -> local
         val merger = Merger(curUrls = openUrls union waitingUrls)
-        if (config.receiving) {
+        if (config.receiving && !shortcut) {
             if (mergeFromCloud(merger)) {
                 merger.closedUrlsInCloud.forEach { (url, timestamp) ->
                     val old = recentUrls.getOrDefault(url, 0)
@@ -488,10 +547,10 @@ class BaiduSyncer(
         }
 
         // Cleans cache of recently closed URLs before sending them to cloud
-        cleanRecentUrls(now)
+        if (!shortcut) cleanRecentUrls(now)
 
         // Sync: local -> cloud
-        if (config.sending) {
+        if (config.sending && !shortcut) {
             mergeToCloud(merger)
         }
 
@@ -724,13 +783,15 @@ class BaiduSyncer(
         val attempted = runAndWait(period = config.wait * 1000L, max = config.slots) {
             var result = Pair(true, 0)
             for (url in urls) {
-                if (!shouldCacheUrl(url, seen)) continue
-                cacheUrl(url, now)
+                if (!shouldCacheUrl(url, seen) || url in recentlyCachedUrls) continue
+                recentlyCachedUrls.add(url)
+                cacheUrl(headlessWebView, url, now)
                 result = Pair(false, 1)
                 break
             }
             result
         }
+        cacheDone = (attempted < config.slots)
 
         val purged = cleanCachedUrls(now)
         if (attempted > 0 || purged > 0) {
@@ -750,20 +811,27 @@ class BaiduSyncer(
     }
 
     // Caches the URL to a local file.
-    private fun cacheUrl(url: String, now: Long) {
+    private fun cacheUrl(webView: NinjaWebView, url: String, now: Long) {
         context.externalCacheDir?.let {
             // Note: filename pattern must be synced with cacheRegex.
             val path = it.path + "/cache-" + nextCachedUrlId++ + ".mht"
             log(Log.DEBUG, "Caching $url to $path")
-            headlessWebView.setOnPageFinishedAction {
-                if (isLoaded(headlessWebView)) {
-                    val title = headlessWebView.albumTitle
-                    headlessWebView.saveWebArchive(path, false) {
+            val steps = listOf({
+                webView.toggleReaderMode()  // note: toggle twice to load lazy images
+            }, {
+                webView.toggleReaderMode()
+            }, {
+                if (isLoaded(webView)) {
+                    val title = webView.albumTitle  // note: needs delay to work
+                    webView.saveWebArchive(path, false) {
                         synchronized(cachedUrls) {
                             cachedUrls[url] = Triple(path, title, now)
                         }
                     }
                 }
+            })
+            webView.setOnPageFinishedAction {
+                chain(webView, 1000L, steps)
             }
             headlessWebView.loadUrl(url)
         }
@@ -788,7 +856,7 @@ class BaiduSyncer(
     }
 
     // Preloads inactive tabs in background.
-    private fun preload() {
+    private fun preload(offline: Boolean) {
         if (!config.preloading) return
 
         val seen = mutableSetOf<Pair<NinjaWebView, String>>()
@@ -798,7 +866,7 @@ class BaiduSyncer(
                 val webView = controller as NinjaWebView
                 val url = webView.initAlbumUrl
                 if (!shouldPreloadUrl(webView, url, seen)) continue
-                preloadUrl(webView, url)
+                preloadUrl(webView, url, offline)
                 result = Pair(false, 1)
                 break
             }
@@ -821,10 +889,13 @@ class BaiduSyncer(
     }
 
     // Preloads the URL in the specified WebView.
-    private fun preloadUrl(webView: NinjaWebView, url: String) {
+    private fun preloadUrl(webView: NinjaWebView, url: String, offline: Boolean) {
         log(Log.DEBUG, "Preloading $url")
-        //webView.setOnPageFinishedAction { onPageFinished(webView) }
-        webView.loadUrl(url)
+        if (offline) {
+            loadUrlFromCache(webView, url)
+        } else {
+            webView.loadUrl(url)
+        }
     }
 
     // Load URL from local cache if available.
@@ -849,12 +920,33 @@ class BaiduSyncer(
 
     // Enter or exit reader mode as appropriate.
     private fun adjustReaderMode(webView: NinjaWebView, url: String) {
-        if (!adjustedUrls.contains(url) &&
+        if (!recentlyAdjustedUrls.contains(url) &&
             readerUrlRegex.matches(url) != webView.isReaderModeOn) {
             log(Log.DEBUG, "Toggling reader mode from ${webView.isReaderModeOn} for $url")
+            recentlyAdjustedUrls.add(url)
             webView.toggleReaderMode()
-            adjustedUrls.add(url)
         }
+    }
+
+    // Sets initial URL and title for each page loaded from cache at startup.
+    private fun updateCachePages() {
+        val lookup = mutableMapOf<String, Pair<String, String>>()  // path -> (url, title)
+        synchronized(cachedUrls) {
+            cachedUrls.forEach { url, triple ->
+                lookup["file://${triple.first}"] = Pair(url, triple.second)
+            }
+        }
+        handler.postDelayed({
+            browserContainer.list().forEach { controller ->
+                val webView = controller as NinjaWebView
+                val url = webView.albumUrl.ifBlank { webView.initAlbumUrl }
+                lookup[url]?.let { pair ->
+                    webView.initAlbumUrl = pair.first
+                    webView.albumTitle = pair.second
+                    log(Log.DEBUG, "Updated cache page: $url -> [${webView.albumTitle}] ${webView.initAlbumUrl}")
+                }
+            }
+        }, config.startup * 1000L)
     }
 
     // Lists normalized URLs of the currently open web pages in the local browser.
@@ -933,10 +1025,21 @@ class BaiduSyncer(
 
     // Displays a message shortly in GUI.
     private fun display(message: String) {
+        fun helper() {
+            val now = Date().time
+            val delay = lastDisplayTime + config.display * 1000L - now
+            if (delay > 0) {
+                handler.postDelayed({ helper() }, delay)
+            } else {
+                lastDisplayTime = now
+                val bar = Snackbar.make(context, view, message, config.display * 1000)
+                bar.setAction("dismiss") { bar.dismiss() }
+                bar.show()
+            }
+        }
+
         log(message)
-        val bar = Snackbar.make(context, view, message, config.display * 1000)
-        bar.setAction("dismiss") { bar.dismiss() }
-        bar.show()
+        handler.post { helper() }
     }
 
     // Logs at INFO priority.
@@ -948,11 +1051,11 @@ class BaiduSyncer(
     // external logging file.
     private fun log(priority: Int, message: String) {
         Log.println(priority, TAG, message)
-        external_log_file?.let {
+        externalLogFile?.let {
             val timestamp = logDateFormat.format(Date())
             val text = timestamp + "  " + message + "\n"
             try {
-                external_log_file!!.appendText(text)
+                it.appendText(text)
             } catch (e: IOException) {
                 // ignored
             }
