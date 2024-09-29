@@ -238,11 +238,11 @@ class BaiduSyncer(
             return result
         }
 
-        fun chain(view: View, steps: Iterable<Pair<() -> Unit, Long>>) {
+        fun chain(handler: Handler, steps: Iterable<Pair<() -> Unit, Long>>) {
             fun proceed(iterator: Iterator<Pair<() -> Unit, Long>>) {
                 if (!iterator.hasNext()) return
                 val pair = iterator.next()
-                view.postDelayed({
+                handler.postDelayed({
                     (pair.first)()
                     proceed(iterator)
                 }, pair.second)
@@ -250,13 +250,14 @@ class BaiduSyncer(
             proceed(steps.iterator())
         }
 
-        fun chain(view: View, interval: Long, steps: Iterable<() -> Unit>) {
+        fun chain(handler: Handler, interval: Long, steps: Iterable<() -> Unit>) {
             val iterator = steps.iterator()
             val pairs = generateSequence {
                 if (iterator.hasNext()) Pair(iterator.next(), interval) else null
             }
-            chain(view, pairs.asIterable())
+            chain(handler, pairs.asIterable())
         }
+
     }
 
     // For GUI interactions.
@@ -835,9 +836,9 @@ class BaiduSyncer(
                 }
             })
             webView.setOnPageFinishedAction {
-                chain(webView, 1000L, steps)
+                chain(handler, 1000L, steps)
             }
-            headlessWebView.loadUrl(url)
+            webView.loadUrl(url)
         }
     }
 
