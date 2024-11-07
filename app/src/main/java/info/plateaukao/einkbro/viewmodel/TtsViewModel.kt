@@ -1,6 +1,5 @@
 package info.plateaukao.einkbro.viewmodel
 
-import android.media.MediaPlayer
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -11,13 +10,13 @@ import info.plateaukao.einkbro.service.OpenAiRepository
 import info.plateaukao.einkbro.service.TranslateRepository
 import info.plateaukao.einkbro.service.TtsManager
 import info.plateaukao.einkbro.tts.ByteArrayMediaDataSource
+import info.plateaukao.einkbro.tts.CustomMediaPlayer
 import info.plateaukao.einkbro.tts.ETts
 import info.plateaukao.einkbro.unit.processedTextToChunks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -35,27 +34,17 @@ class TtsViewModel : ViewModel(), KoinComponent {
 
     private val eTts: ETts = ETts()
 
-    private val mediaPlayer by lazy { MediaPlayer() }
+    private val mediaPlayer by lazy { CustomMediaPlayer() }
     private var byteArrayChannel: Channel<ChannelData>? = null
 
-    // for showing play controls state
-    private val _speakingState = MutableStateFlow(false)
-    val speakingState: StateFlow<Boolean> = _speakingState.asStateFlow()
-
-    private val _isReading = MutableStateFlow(false)
-    val isReading: StateFlow<Boolean> = _isReading.asStateFlow()
-
     private val _readProgress = MutableStateFlow(ReadProgress(0, 0, 0))
-    val readProgress: StateFlow<ReadProgress> = _readProgress.asStateFlow()
+    val readProgress: StateFlow<ReadProgress> get() = _readProgress
 
     private val _readingState = MutableStateFlow(TtsReadingState.IDLE)
-    val readingState: StateFlow<TtsReadingState> = _readingState.asStateFlow()
+    val readingState: StateFlow<TtsReadingState> get() = _readingState
 
     private val _showCurrentText = MutableStateFlow(config.ttsShowCurrentText)
-    val showCurrentText: StateFlow<Boolean> = _showCurrentText.asStateFlow()
-
-    private val _showTranslation = MutableStateFlow(config.ttsShowTextTranslation)
-    val showTranslation: StateFlow<Boolean> = _showTranslation.asStateFlow()
+    val showCurrentText: StateFlow<Boolean> get() = _showCurrentText
 
     private val openaiRepository: OpenAiRepository by lazy { OpenAiRepository() }
 
@@ -69,10 +58,9 @@ class TtsViewModel : ViewModel(), KoinComponent {
     private val articlesToBeRead: MutableList<String> = mutableListOf()
 
     private val _currentReadingContent = MutableStateFlow("")
-    val currentReadingContent: StateFlow<String> = _currentReadingContent.asStateFlow()
+    val currentReadingContent: StateFlow<String> get() = _currentReadingContent
 
     fun readArticle(text: String) {
-        _isReading.value = true
 
         articlesToBeRead.add(text)
         if (isReading()) {
@@ -85,12 +73,13 @@ class TtsViewModel : ViewModel(), KoinComponent {
         viewModelScope.launch {
             while (articlesToBeRead.isNotEmpty()) {
                 val article = articlesToBeRead.removeAt(0)
+                if (article.isEmpty()) continue
 
                 Log.d("TtsViewModel", "readArticle: $article")
                 when (type) {
                     TtsType.ETTS,
                     TtsType.GPT,
-                    -> readByEngine(type, article)
+                        -> readByEngine(type, article)
 
                     TtsType.SYSTEM -> {
                         updateReadProgress()
@@ -99,8 +88,7 @@ class TtsViewModel : ViewModel(), KoinComponent {
                 }
             }
 
-            _speakingState.value = false
-            _isReading.value = false
+            _currentReadingContent.value = ""
             _readProgress.value = ReadProgress(0, 0, 0)
             _readingState.value = TtsReadingState.IDLE
         }
@@ -113,12 +101,11 @@ class TtsViewModel : ViewModel(), KoinComponent {
     }
 
     private suspend fun readBySystemTts(text: String) {
-        _speakingState.value = true
         _readingState.value = TtsReadingState.PLAYING
         ttsManager.readText(
             text,
-            onProgress = { index, total ->
-                updateReadProgress(index, total, text)
+            onProgress = { index, total, currentContent ->
+                updateReadProgress(index, total, currentContent)
             },
         )
     }
@@ -126,18 +113,19 @@ class TtsViewModel : ViewModel(), KoinComponent {
     private fun updateReadProgress(
         index: Int = _readProgress.value.index,
         total: Int = _readProgress.value.total,
-        text: String = "",
+        text: String? = null,
         articleLeftCount: Int = articlesToBeRead.size,
     ) {
         _readProgress.value = ReadProgress(index, total, articleLeftCount)
-        _currentReadingContent.value = text
-
-        insertTranslationText(text)
+        text?.let {
+            //_currentReadingContent.value = it
+            maybeInsertTranslationText(text)
+        }
     }
 
     private val translationSeparator = "\n---\n"
-    private fun insertTranslationText(text: String) {
-        if (_showTranslation.value) {
+    private fun maybeInsertTranslationText(text: String) {
+        if (config.ttsShowTextTranslation) {
             viewModelScope.launch {
                 val translatedText = translateRepository.gTranslateWithApi(text, config.translationLanguage.value)
                 _currentReadingContent.value = "$text$translationSeparator$translatedText"
@@ -145,16 +133,18 @@ class TtsViewModel : ViewModel(), KoinComponent {
         } else {
             if (_currentReadingContent.value.contains(translationSeparator)) {
                 _currentReadingContent.value = _currentReadingContent.value.substringBefore(translationSeparator)
+            } else {
+                _currentReadingContent.value = text
             }
         }
     }
 
     private suspend fun readByEngine(ttsType: TtsType, text: String) {
+        byteArrayChannel?.cancel()
         byteArrayChannel = Channel(1)
         val chunks = processedTextToChunks(text)
 
-        viewModelScope.launch(Dispatchers.IO) {
-            _speakingState.value = true
+        val articleTtsFetchJob = viewModelScope.launch(Dispatchers.IO) {
 
             chunks.forEachIndexed { index, chunk ->
                 if (byteArrayChannel == null) return@launch
@@ -167,30 +157,36 @@ class TtsViewModel : ViewModel(), KoinComponent {
                         openaiRepository.tts(chunk)
                     }
 
-                    if (byteArray != null) {
-                        Log.d("TtsViewModel", "tts sentence send ($index) : $chunk")
-                        byteArrayChannel?.send(ChannelData(byteArray, chunk))
-                        Log.d("TtsViewModel", "tts sentence sent ($index) : $chunk")
-                    }
+                    Log.d("TtsViewModel", "tts sentence send ($index) : $chunk")
+                    if (byteArrayChannel == null) return@launch
+                    byteArrayChannel?.send(ChannelData(byteArray, chunk, index))
+                    Log.d("TtsViewModel", "tts sentence sent ($index) : $chunk")
                 }
             }
-            byteArrayChannel?.close()
         }
 
         var index = 0
-        for (channelData in byteArrayChannel!!) {
+        while (byteArrayChannel != null) {
+            val channelData = byteArrayChannel!!.receive()
             Log.d("TtsViewModel", "play audio $index")
+
             val byteArray = channelData.byteArray
             val text = channelData.text
+            val chunkIndex = channelData.chunkIndex
             updateReadProgress(index = index + 1, total = chunks.size, text)
 
-            playAudioByteArray(byteArray)
+            if (byteArray != null) {
+                playAudioByteArray(byteArray)
+            } else {
+                Log.e("TtsViewModel", "byteArray is null for $text")
+            }
+            if (chunkIndex == chunks.size - 1) break
+
             index++
-            if (byteArrayChannel?.isClosedForSend == true &&
-                byteArrayChannel?.isEmpty == true
-            ) break
         }
 
+        articleTtsFetchJob.cancel()
+        byteArrayChannel?.cancel()
         byteArrayChannel = null
     }
 
@@ -202,63 +198,49 @@ class TtsViewModel : ViewModel(), KoinComponent {
         if (type == TtsType.SYSTEM) {
             // TODO
             return
-        } else {
-            try {
-                mediaPlayer.let {
-                    if (it.isPlaying) {
-                        _readingState.value = TtsReadingState.PAUSED
-                        it.pause()
-                    } else {
-                        _readingState.value = TtsReadingState.PLAYING
-                        it.start()
-                    }
+        }
+
+        try {
+            mediaPlayer.let {
+                if (it.isPlaying) {
+                    _readingState.value = TtsReadingState.PAUSED
+                    it.pause()
+                } else {
+                    _readingState.value = TtsReadingState.PLAYING
+                    it.start()
                 }
-            } catch (e: Exception) {
-                Log.e("TtsViewModel", "pauseOrResume: ${e.message}")
-                mediaPlayer.reset()
             }
+        } catch (e: Exception) {
+            Log.e("TtsViewModel", "pauseOrResume: ${e.message}")
+            mediaPlayer.reset()
         }
     }
 
     fun hasNextArticle(): Boolean = articlesToBeRead.isNotEmpty()
 
     fun nextArticle() {
-        if (type == TtsType.SYSTEM) {
-            ttsManager.stopReading()
-        } else {
-            // stop current one
-            byteArrayChannel?.close()
-            byteArrayChannel = null
-            mediaPlayer.let {
-                if (it.isPlaying) {
-                    it.stop()
-                    it.reset()
-                }
-            }
-        }
+        stop()
     }
 
-    fun stop() {
+    fun reset() {
         articlesToBeRead.clear()
-
-        ttsManager.stopReading()
-
-        byteArrayChannel?.cancel()
-        byteArrayChannel?.close()
-        byteArrayChannel = null
-        mediaPlayer.stop()
-        mediaPlayer.reset()
-
-
-        _speakingState.value = false
-        _isReading.value = false
+        stop()
+        _currentReadingContent.value = ""
         _readingState.value = TtsReadingState.IDLE
     }
 
-    fun isReading(): Boolean {
-        Log.d("TtsViewModel", "isSpeaking: ${ttsManager.isSpeaking()} ${byteArrayChannel != null}")
-        return ttsManager.isSpeaking() || byteArrayChannel != null
+    fun stop() {
+        if (type == TtsType.SYSTEM) {
+            ttsManager.stopReading()
+        } else {
+            byteArrayChannel?.cancel()
+            byteArrayChannel?.close()
+            byteArrayChannel = null
+            mediaPlayer.reset()
+        }
     }
+
+    fun isReading(): Boolean = _readingState.value != TtsReadingState.IDLE
 
     fun toggleShowCurrentText() {
         config::ttsShowCurrentText.toggle()
@@ -267,16 +249,21 @@ class TtsViewModel : ViewModel(), KoinComponent {
 
     fun toggleShowTranslation() {
         config::ttsShowTextTranslation.toggle()
-        _showTranslation.value = config.ttsShowTextTranslation
 
-        insertTranslationText(_currentReadingContent.value)
+        maybeInsertTranslationText(_currentReadingContent.value)
     }
 
     fun getAvailableLanguages(): List<Locale> = ttsManager.getAvailableLanguages()
 
     private suspend fun playAudioByteArray(byteArray: ByteArray) = suspendCoroutine { cont ->
         try {
+            mediaPlayer.setOnResetListener {
+                mediaPlayer.setOnResetListener { }
+                cont.resume(0)
+            }
+
             mediaPlayer.setDataSource(ByteArrayMediaDataSource(byteArray))
+
             mediaPlayer.setOnPreparedListener {
                 mediaPlayer.start()
             }
@@ -284,17 +271,16 @@ class TtsViewModel : ViewModel(), KoinComponent {
 
             mediaPlayer.setOnCompletionListener {
                 mediaPlayer.reset()
-                cont.resume(0)
             }
             mediaPlayer.setOnErrorListener { value1, value2, value3 ->
                 Log.e("TtsViewModel", "playAudioArray: error $value1 $value2 $value3")
                 mediaPlayer.reset()
-                cont.resume(0)
                 true
             }
+
         } catch (e: Exception) {
+            //mediaPlayer.reset()
             Log.e("TtsViewModel", "playAudioArray exception: ${e.message}")
-            mediaPlayer.reset()
             cont.resume(0)
         }
     }
@@ -329,4 +315,4 @@ data class ReadProgress(val index: Int, val total: Int, val articleLeftCount: In
     }
 }
 
-class ChannelData(val byteArray: ByteArray, val text: String)
+class ChannelData(val byteArray: ByteArray?, val text: String, val chunkIndex: Int)

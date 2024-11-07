@@ -3,6 +3,7 @@ package info.plateaukao.einkbro.browser
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Message
@@ -29,10 +30,11 @@ import info.plateaukao.einkbro.caption.DualCaptionProcessor
 import info.plateaukao.einkbro.preference.ConfigManager
 import info.plateaukao.einkbro.unit.BrowserUnit
 import info.plateaukao.einkbro.unit.HelperUnit
-import info.plateaukao.einkbro.view.NinjaToast
-import info.plateaukao.einkbro.view.NinjaWebView
+import info.plateaukao.einkbro.view.EBToast
+import info.plateaukao.einkbro.view.EBWebView
 import info.plateaukao.einkbro.view.dialog.DialogManager
 import info.plateaukao.einkbro.view.dialog.compose.AuthenticationDialogFragment
+import io.github.edsuns.adfilter.AdFilter
 import nl.siegmann.epublib.domain.Book
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
@@ -40,19 +42,20 @@ import java.io.ByteArrayInputStream
 import java.io.IOException
 
 
-class NinjaWebViewClient(
-    private val ninjaWebView: NinjaWebView,
+class EBWebViewClient(
+    private val ebWebView: EBWebView,
     private val addHistoryAction: (String, String) -> Unit,
 ) : WebViewClient(), KoinComponent {
-    private val context: Context = ninjaWebView.context
+    private val context: Context = ebWebView.context
     private val config: ConfigManager by inject()
-    private val adBlock: AdBlockV2 by inject()
     private val cookie: Cookie by inject()
     private val dialogManager: DialogManager by lazy { DialogManager(context as Activity) }
 
     private val webContentPostProcessor = WebContentPostProcessor()
     private var hasAdBlock: Boolean = true
     var book: Book? = null
+
+    private val adFilter: AdFilter = AdFilter.get()
 
     private val dualCaptionProcessor = DualCaptionProcessor()
 
@@ -65,33 +68,40 @@ class NinjaWebViewClient(
         onPageFinishedAction = action
     }
 
+    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+        super.onPageStarted(view, url, favicon)
+        if (config.adBlock) {
+            adFilter.performScript(view, url)
+        }
+    }
+
     override fun onPageFinished(view: WebView, url: String) {
-        ninjaWebView.updateCssStyle()
+        ebWebView.updateCssStyle()
 
-        Log.d("NinjaWebViewClient", "onPageFinished: ${ninjaWebView.url}\n$url")
-        webContentPostProcessor.postProcess(ninjaWebView, url)
+        Log.d("ebWebViewClient", "onPageFinished: ${ebWebView.url}\n$url")
+        webContentPostProcessor.postProcess(ebWebView, url)
 
-        if (ninjaWebView.shouldHideTranslateContext) {
-            ninjaWebView.postDelayed({
-                ninjaWebView.hideTranslateContext()
+        if (ebWebView.shouldHideTranslateContext) {
+            ebWebView.postDelayed({
+                ebWebView.hideTranslateContext()
             }, 2000)
         }
 
-        ninjaWebView.postDelayed({
-            ninjaWebView.updatePageInfo()
+        ebWebView.postDelayed({
+            ebWebView.updatePageInfo()
         }, 1000)
 
         // skip translation pages
         if (config.isSaveHistoryWhenLoad() &&
-            !ninjaWebView.incognito &&
+            !ebWebView.incognito &&
             !isTranslationDomain(url) &&
             url != BrowserUnit.URL_ABOUT_BLANK
         ) {
-            addHistoryAction(ninjaWebView.albumTitle, url)
+            addHistoryAction(ebWebView.albumTitle, url)
         }
 
         // test
-        ninjaWebView.evaluateJavascript(
+        ebWebView.evaluateJavascript(
             """
                     function findTargetWithA(e){
                         var tt = e;
@@ -129,25 +139,25 @@ class NinjaWebViewClient(
 
     private fun handleUri(webView: WebView, uri: Uri): Boolean {
         val url = uri.toString()
-        Log.d("NinjaWebViewClient", "handleUri: $url")
+        Log.d("ebWebViewClient", "handleUri: $url")
         val list = webView.copyBackForwardList()
 
         for (i in 0 until list.size) {
             val item = list.getItemAtIndex(i)
             val title = item.title
             val url = item.url
-            Log.d("NinjaWebViewClient", "Title: $title - URL: $url")
+            Log.d("ebWebViewClient", "Title: $title - URL: $url")
         }
 
         // handle pocket authentication
         if (url.startsWith("einkbropocket://pocket-auth")) {
             val requestToken = url.substringAfter("code=", "")
-            ninjaWebView.handlePocketRequestToken(requestToken)
+            ebWebView.handlePocketRequestToken(requestToken)
             return true
         }
 
         if (url.startsWith("http")) {
-//            webView.loadUrl(url, ninjaWebView.requestHeaders)
+//            webView.loadUrl(url, ebWebView.requestHeaders)
 //            return true
             return false
         }
@@ -168,7 +178,7 @@ class NinjaWebViewClient(
                     try {
                         context.startActivity(intent)
                     } catch (e: Exception) {
-                        NinjaToast.show(context, R.string.toast_load_error)
+                        EBToast.show(context, R.string.toast_load_error)
                     }
                     return true
                 }
@@ -200,7 +210,7 @@ class NinjaWebViewClient(
             try {
                 context.startActivity(intent)
             } catch (e: Exception) {
-                NinjaToast.show(context, R.string.toast_load_error)
+                EBToast.show(context, R.string.toast_load_error)
             }
             return true
         }
@@ -208,12 +218,6 @@ class NinjaWebViewClient(
         webView.loadUrl(fallbackUrl)
         return true
     }
-
-    private val adTxtResponse: WebResourceResponse = WebResourceResponse(
-        BrowserUnit.MIME_TYPE_TEXT_PLAIN,
-        BrowserUnit.URL_ENCODING,
-        ByteArrayInputStream("".toByteArray())
-    )
 
     override fun onReceivedHttpAuthRequest(
         view: WebView?,
@@ -233,9 +237,9 @@ class NinjaWebViewClient(
     ) {
         // if https is not available, try http
         if (error?.description == "net::ERR_SSL_PROTOCOL_ERROR" && request != null) {
-            ninjaWebView.loadUrl(request.url.buildUpon().scheme("http").build().toString())
+            ebWebView.loadUrl(request.url.buildUpon().scheme("http").build().toString())
         } else {
-            Log.e("NinjaWebViewClient", "onReceivedError:${request?.url} / ${error?.description}")
+            Log.e("ebWebViewClient", "onReceivedError:${request?.url} / ${error?.description}")
         }
     }
 
@@ -246,14 +250,17 @@ class NinjaWebViewClient(
     override fun shouldInterceptRequest(
         view: WebView,
         request: WebResourceRequest,
-    ): WebResourceResponse? =
-        handleWebRequest(view, request.url) ?: super.shouldInterceptRequest(view, request)
+    ): WebResourceResponse? {
+        if (config.adBlock) {
+            val result = adFilter.shouldIntercept(view, request)
+            if (result.shouldBlock) return result.resourceResponse
+        }
+
+        return handleWebRequest(view, request.url) ?: super.shouldInterceptRequest(view, request)
+    }
 
     private fun handleWebRequest(webView: WebView, uri: Uri): WebResourceResponse? {
         val url = uri.toString()
-        if (hasAdBlock && !adBlock.isWhite(url) && adBlock.isAd(url)) {
-            return adTxtResponse
-        }
 
         if (!config.cookies) {
             if (cookie.isWhite(url)) {
@@ -269,7 +276,7 @@ class NinjaWebViewClient(
         processBookResource(uri)?.let { return it }
         processCustomFontRequest(uri)?.let { return it }
         dualCaptionProcessor.processUrl(url)?.let {
-            ninjaWebView.dualCaption = it
+            ebWebView.dualCaption = it
             return WebResourceResponse(
                 "application/json",
                 "UTF-8",
@@ -296,7 +303,7 @@ class NinjaWebViewClient(
 
     private fun processCustomFontRequest(uri: Uri): WebResourceResponse? {
         if (uri.path?.contains("mycustomfont") == true) {
-            val fontUri = if (!ninjaWebView.shouldUseReaderFont()) {
+            val fontUri = if (!ebWebView.shouldUseReaderFont()) {
                 config.customFontInfo?.url?.toUri() ?: return null
             } else {
                 config.readerCustomFontInfo?.url?.toUri() ?: return null
@@ -345,7 +352,7 @@ class NinjaWebViewClient(
             return true
         } catch (e: Exception) {
             Log.e(
-                "NinjaWebViewClient",
+                "ebWebViewClient",
                 "Error when getting CertificateChain or PrivateKey for alias '${alias}'",
                 e
             )
@@ -394,6 +401,6 @@ class NinjaWebViewClient(
     }
 
     companion object {
-        private const val TAG = "NinjaWebViewClient"
+        private const val TAG = "ebWebViewClient"
     }
 }

@@ -29,6 +29,8 @@ import androidx.compose.material.Divider
 import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,9 +38,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -49,7 +52,7 @@ import info.plateaukao.einkbro.database.Bookmark
 import info.plateaukao.einkbro.database.BookmarkManager
 import info.plateaukao.einkbro.databinding.DialogMenuContextListBinding
 import info.plateaukao.einkbro.unit.ViewUnit
-import info.plateaukao.einkbro.view.NinjaToast
+import info.plateaukao.einkbro.view.EBToast
 import info.plateaukao.einkbro.view.compose.MyTheme
 import info.plateaukao.einkbro.view.compose.NormalTextModifier
 import info.plateaukao.einkbro.view.dialog.BookmarkEditDialog
@@ -59,7 +62,6 @@ import info.plateaukao.einkbro.viewmodel.BookmarkViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyGridState
 
@@ -72,7 +74,6 @@ class BookmarksDialogFragment(
     private val syncBookmarksAction: (Boolean) -> Unit,
     private val linkBookmarksAction: () -> Unit,
 ) : ComposeDialogFragment(), KoinComponent {
-    private val bookmarkManager: BookmarkManager by inject()
     private val dialogManager: DialogManager by lazy { DialogManager(requireActivity()) }
 
     private lateinit var bookmarksUpdateJob: Job
@@ -99,7 +100,7 @@ class BookmarksDialogFragment(
                     reorderBookmarkAction = {
                         shouldShowDragHandle.value = !shouldShowDragHandle.value
                         if (shouldShowDragHandle.value) {
-                            NinjaToast.show(context, getString(R.string.drag_to_reorder))
+                            EBToast.show(context, getString(R.string.drag_to_reorder))
                         }
                     },
                     closeAction = { dialog?.dismiss() }) {
@@ -112,7 +113,7 @@ class BookmarksDialogFragment(
                     } else {
                         BookmarkList(
                             bookmarks = bookmarks.value,
-                            bookmarkManager = bookmarkManager,
+                            bookmarkViewModel = bookmarkViewModel,
                             isWideLayout = ViewUnit.isWideLayout(requireContext()),
                             shouldReverse = !config.isToolbarOnTop,
                             shouldShowDragHandle = shouldShowDragHandle.value,
@@ -181,12 +182,13 @@ class BookmarksDialogFragment(
                     bookmark.title,
                     bookmark.url,
                     true
-                ); dialog?.dismiss()
+                )
+                dialog?.dismiss()
             }
         }
         dialogView.menuContextListDelete.setOnClickListener {
             lifecycleScope.launch {
-                bookmarkManager.delete(bookmark)
+                bookmarkViewModel.deleteBookmark(bookmark)
                 syncBookmarksAction(true)
             }
             optionDialog.dismiss()
@@ -220,8 +222,7 @@ fun DialogPanel(
     content: @Composable () -> Unit,
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = Modifier.fillMaxWidth()
     ) {
         Box(Modifier.weight(1F, fill = false)) {
             content()
@@ -280,7 +281,7 @@ fun DialogPanel(
 @Composable
 fun BookmarkList(
     bookmarks: List<Bookmark>,
-    bookmarkManager: BookmarkManager? = null,
+    bookmarkViewModel: BookmarkViewModel,
     isWideLayout: Boolean = false,
     shouldReverse: Boolean = true,
     shouldShowDragHandle: Boolean = false,
@@ -307,7 +308,7 @@ fun BookmarkList(
             ReorderableItem(reorderableLazyGridState, key = bookmark.id) { isDragging ->
                 BookmarkItem(
                     bookmark = bookmark,
-                    bitmap = bookmarkManager?.findFaviconBy(bookmark.url)?.getBitmap(),
+                    bitmap = bookmarkViewModel.getFavicon(bookmark),
                     isPressed = isPressed || isDragging,
                     shouldShowDragHandle = shouldShowDragHandle,
                     dragModifier = Modifier.draggableHandle(),
@@ -325,7 +326,7 @@ fun BookmarkList(
                                     interactionSource = interactionSource,
                                     indication = null,
                                     onClick = { onBookmarkClick(bookmark) },
-                                    onLongClick = { onBookmarkLongClick?.invoke(bookmark) },
+                                    onLongClick = { onBookmarkLongClick(bookmark) },
                                 )
                             }
                         ),
@@ -349,7 +350,7 @@ fun BookmarkItem(
     dragModifier: Modifier = Modifier,
     iconClick: () -> Unit,
 ) {
-    val borderWidth = if (isPressed) 1.dp else -1.dp
+    val borderWidth = if (isPressed) 1.dp else (-1).dp
 
     Row(
         modifier = modifier
@@ -362,7 +363,7 @@ fun BookmarkItem(
         if (shouldShowDragHandle) {
             Icon(
                 modifier = dragModifier.padding(8.dp),
-                painter = painterResource(id = R.drawable.ic_drag),
+                imageVector = Icons.Outlined.DragHandle,
                 contentDescription = null,
                 tint = MaterialTheme.colors.onBackground
             )
@@ -413,7 +414,7 @@ fun ActionIcon(
                 onClick = { action?.invoke() },
                 onLongClick = { longClickAction?.invoke() },
             ),
-        painter = painterResource(id = iconResId),
+        imageVector = ImageVector.vectorResource(id = iconResId),
         contentDescription = null,
         tint = MaterialTheme.colors.onBackground
     )
@@ -425,7 +426,7 @@ private fun PreviewBookmarkList() {
     MyTheme {
         BookmarkList(
             bookmarks = listOf(Bookmark("test 1", "https://www.google.com", false)),
-            null,
+            BookmarkViewModel(bookmarkManager = BookmarkManager(LocalContext.current)),
             isWideLayout = true,
             shouldReverse = true,
             shouldShowDragHandle = false,
@@ -454,7 +455,7 @@ private fun PreviewDialogPanel() {
         ) {
             BookmarkList(
                 bookmarks = listOf(Bookmark("test 1", "https://www.google.com", false)),
-                null,
+                BookmarkViewModel(bookmarkManager = BookmarkManager(LocalContext.current)),
                 isWideLayout = true,
                 shouldReverse = true,
                 shouldShowDragHandle = false,

@@ -77,7 +77,6 @@ fun TranslationConfigScreen(
         ToggleItem(
             state = shouldTranslateThisSite,
             titleResId = R.string.translate_this_site,
-            iconResId = -1
         ) {
             toggleTranslateThisSite()
         }
@@ -93,15 +92,16 @@ fun TranslationConfigScreen(
             expanded = actionExpanded,
             onDismissRequest = { actionExpanded = false }
         ) {
-            TranslationMode.entries.forEach { type ->
-                val text = context.getString(type.labelResId)
-                DropdownMenuItem(onClick = {
-                    translationModeChanged(type)
-                    actionExpanded = false
-                }) {
-                    Text(text = text)
+            TranslationMode.entries.toMutableList().apply { remove(TranslationMode.DEEPL_BY_PARAGRAPH) }
+                .forEach { type ->
+                    val text = context.getString(type.labelResId)
+                    DropdownMenuItem(onClick = {
+                        translationModeChanged(type)
+                        actionExpanded = false
+                    }) {
+                        Text(text = text)
+                    }
                 }
-            }
         }
     }
 }

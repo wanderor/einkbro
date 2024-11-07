@@ -52,9 +52,9 @@ import info.plateaukao.einkbro.activity.SettingRoute.Toolbar
 import info.plateaukao.einkbro.activity.SettingRoute.Ui
 import info.plateaukao.einkbro.activity.SettingRoute.UserAgent
 import info.plateaukao.einkbro.activity.SettingRoute.valueOf
-import info.plateaukao.einkbro.browser.AdBlockV2
 import info.plateaukao.einkbro.preference.ConfigManager
 import info.plateaukao.einkbro.preference.HighlightStyle
+import info.plateaukao.einkbro.preference.TranslationTextStyle
 import info.plateaukao.einkbro.setting.ActionSettingItem
 import info.plateaukao.einkbro.setting.BooleanSettingItem
 import info.plateaukao.einkbro.setting.DividerSettingItem
@@ -71,12 +71,10 @@ import info.plateaukao.einkbro.unit.BrowserUnit
 import info.plateaukao.einkbro.unit.HelperUnit
 import info.plateaukao.einkbro.unit.LocaleManager
 import info.plateaukao.einkbro.view.GestureType
-import info.plateaukao.einkbro.view.NinjaToast
 import info.plateaukao.einkbro.view.compose.MyTheme
 import info.plateaukao.einkbro.view.dialog.DialogManager
 import info.plateaukao.einkbro.view.dialog.PrinterDocumentPaperSizeDialog
 import info.plateaukao.einkbro.view.dialog.TranslationLanguageDialog
-import info.plateaukao.einkbro.view.dialog.compose.ToolbarConfigDialogFragment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
@@ -84,7 +82,6 @@ import org.koin.android.ext.android.inject
 class SettingActivity : FragmentActivity() {
     private val config: ConfigManager by inject()
     private val dialogManager: DialogManager by lazy { DialogManager(this) }
-    private val adBlock: AdBlockV2 by inject()
     private val backupUnit: BackupUnit by lazy { BackupUnit(this) }
 
     private lateinit var openBookmarkFileLauncher: ActivityResultLauncher<Intent>
@@ -558,9 +555,7 @@ class SettingActivity : FragmentActivity() {
             0,
             R.string.toolbar_icons_description,
         ) {
-            ToolbarConfigDialogFragment().show(
-                this@SettingActivity.supportFragmentManager, "toolbar_config"
-            )
+            startActivity(Intent(this, ToolbarConfigActivity::class.java))
         },
         BooleanSettingItem(
             R.string.setting_title_toolbar_top,
@@ -818,8 +813,15 @@ class SettingActivity : FragmentActivity() {
             0,
             R.string.setting_summary_highlight_style,
             config = config::highlightStyle,
-            options = HighlightStyle.entries.filter { it != HighlightStyle.BACKGROUND_NONE }
+            options = HighlightStyle.entries
                 .map { it.stringResId },
+        ),
+        ListSettingWithEnumItem(
+            R.string.setting_title_translation_style,
+            0,
+            R.string.setting_summary_translation_style,
+            config = config::translationTextStyle,
+            options = TranslationTextStyle.entries.map { it.stringResId },
         ),
         NavigateSettingItem(
             R.string.setting_title_userAgent,
@@ -838,12 +840,12 @@ class SettingActivity : FragmentActivity() {
             ).show()
         },
         DividerSettingItem(),
-        BooleanSettingItem(
-            R.string.setting_title_enable_inplace_translate,
-            0,
-            R.string.setting_summary_enable_inplace_translate,
-            config::enableInplaceParagraphTranslate
-        ),
+//        BooleanSettingItem(
+//            R.string.setting_title_enable_inplace_translate,
+//            0,
+//            R.string.setting_summary_enable_inplace_translate,
+//            config::enableInplaceParagraphTranslate
+//        ),
         ValueSettingItem(
             R.string.setting_title_translated_langs,
             0,
@@ -1021,34 +1023,19 @@ class SettingActivity : FragmentActivity() {
             R.string.setting_summary_adblock,
             config::adBlock
         ),
-        BooleanSettingItem(
-            R.string.setting_title_adblock_auto_update,
-            0,
-            R.string.setting_summary_adblock_auto_update,
-            config::autoUpdateAdblock
-        ),
-        ActionSettingItem(
-            R.string.setting_title_whitelist,
-            0,
-            R.string.setting_summary_whitelist,
-        ) { startActivity(DataListActivity.createIntent(this, WhiteListType.Adblock)) },
         ActionSettingItem(
             R.string.setting_title_update_adblock,
             0,
             R.string.setting_summary_update_adblock,
         ) {
-            lifecycleScope.launch {
-                adBlock.downloadHosts(this@SettingActivity) {
-                    NinjaToast.show(this@SettingActivity, R.string.toast_adblock_updated)
-                }
-            }
+            startActivity(Intent(this, AdBlockSettingActivity::class.java))
+            finish()
         },
-        ValueSettingItem(
-            R.string.setting_title_adblock_url,
+        ActionSettingItem(
+            R.string.setting_title_whitelist,
             0,
-            R.string.setting_summary_adblock_url,
-            config = config::adblockHostUrl,
-        ),
+            R.string.setting_summary_whitelist,
+        ) { startActivity(DataListActivity.createIntent(this, WhiteListType.Adblock)) },
         DividerSettingItem(),
         BooleanSettingItem(
             R.string.setting_title_javascript,

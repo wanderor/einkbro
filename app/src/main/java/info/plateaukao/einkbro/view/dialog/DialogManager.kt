@@ -21,7 +21,7 @@ import info.plateaukao.einkbro.preference.ConfigManager
 import info.plateaukao.einkbro.unit.HelperUnit
 import info.plateaukao.einkbro.unit.ViewUnit
 import info.plateaukao.einkbro.util.Constants
-import info.plateaukao.einkbro.view.NinjaToast
+import info.plateaukao.einkbro.view.EBToast
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import kotlin.system.exitProcess
@@ -134,7 +134,7 @@ class DialogManager(
                 val ext = editExtension.text.toString().trim { it <= ' ' }
                 val fileName = title + ext
                 if (title.isEmpty() || ext.isEmpty() || !extension.startsWith(".")) {
-                    NinjaToast.show(activity, activity.getString(R.string.toast_input_empty))
+                    EBToast.show(activity, activity.getString(R.string.toast_input_empty))
                 } else {
                     saveFile(url, fileName)
                 }
@@ -221,7 +221,7 @@ class DialogManager(
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
         intent.addCategory(Intent.CATEGORY_OPENABLE)
         intent.type = Constants.MIME_TYPE_TEXT
-        intent.putExtra(Intent.EXTRA_TITLE, "bookmark.txt")
+        intent.putExtra(Intent.EXTRA_TITLE, "bookmarks.json")
         activity.startActivityForResult(intent, EXPORT_BOOKMARKS_REQUEST_CODE)
     }
 
@@ -246,6 +246,15 @@ class DialogManager(
         intent.type = Constants.MIME_TYPE_ANY
         activity.startActivityForResult(intent, IMPORT_BACKUP_REQUEST_CODE)
     }
+
+//    fun showRemoveHighlightConfirmDialog(
+//        action: () -> Unit,
+//    ) {
+//        showOkCancelDialog(
+//            messageResId = R.string.dialog_message_remove_highlight,
+//            okAction = action,
+//        )
+//    }
 
     fun showRestartConfirmDialog() {
         showOkCancelDialog(

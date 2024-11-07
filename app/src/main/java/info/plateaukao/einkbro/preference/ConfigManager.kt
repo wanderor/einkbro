@@ -149,7 +149,7 @@ class ConfigManager(
 
     var useOpenAiTts by BooleanPreference(sp, K_USE_OPENAI_TTS, true)
 
-    var webLoadCacheFirst by BooleanPreference(sp, "sp_web_load_cache_first", true)
+    var webLoadCacheFirst by BooleanPreference(sp, "sp_web_load_cache_first", false)
 
     var pageReservedOffset: Int by IntPreference(sp, K_PRESERVE_HEIGHT, 80)
 
@@ -230,7 +230,6 @@ class ConfigManager(
         K_GPT_USER_PROMPT_WEB_PAGE,
         "Summarize in 300 words:"
     )
-    var papagoApiSecret by StringPreference(sp, K_PAPAGO_API_SECRET, "")
     var imageApiKey by StringPreference(sp, K_IMAGE_API_KEY, "")
     var gptModel by StringPreference(sp, K_GPT_MODEL, "gpt-3.5-turbo")
     var alternativeModel by StringPreference(sp, K_ALTERNATIVE_MODEL, gptModel)
@@ -346,7 +345,7 @@ class ConfigManager(
         )
         set(value) {
             sp.edit { putString("K_ETTS_VOICE", Json.encodeToString(value)) }
-            recentUsedTtsVoices = recentUsedTtsVoices.apply { add (0, value) }
+            recentUsedTtsVoices = recentUsedTtsVoices.apply { add(0, value) }
         }
 
     var uiLocaleLanguage by StringPreference(sp, "sp_ui_locale_language", "")
@@ -609,6 +608,10 @@ class ConfigManager(
     var highlightStyle: HighlightStyle
         get() = HighlightStyle.entries[sp.getInt(K_HIGHLIGHT_STYLE, 0)]
         set(value) = sp.edit { putInt(K_HIGHLIGHT_STYLE, value.ordinal) }
+
+    var translationTextStyle: TranslationTextStyle
+        get() = TranslationTextStyle.entries[sp.getInt("K_TRANSLATION_TEXT_STYLE", 1)]
+        set(value) = sp.edit { putInt("K_TRANSLATION_TEXT_STYLE", value.ordinal) }
 
     var adSites: MutableSet<String>
         get() = sp.getStringSet(K_ADBLOCK_SITES, mutableSetOf()) ?: mutableSetOf()
@@ -1078,7 +1081,8 @@ enum class TranslationMode(val labelResId: Int) {
     GOOGLE_IN_PLACE(R.string.google_in_place),
     TRANSLATE_BY_PARAGRAPH(R.string.translate_by_paragraph),
     PAPAGO_TRANSLATE_BY_PARAGRAPH(R.string.papago_translate_by_paragraph),
-    PAPAGO_TRANSLATE_BY_SCREEN(R.string.papago_translate_by_screen)
+    PAPAGO_TRANSLATE_BY_SCREEN(R.string.papago_translate_by_screen),
+    DEEPL_BY_PARAGRAPH(R.string.deepl_translate_by_paragraph),
 }
 
 enum class FontType(val resId: Int) {
@@ -1129,11 +1133,16 @@ enum class HighlightStyle(
         R.string.pink,
         R.drawable.ic_highlight_color,
     ),
-    BACKGROUND_NONE(
-        null,
-        R.string.menu_delete,
-        R.drawable.icon_delete,
-    )
+}
+
+enum class TranslationTextStyle(
+    val stringResId: Int,
+) {
+    NONE(R.string.none),
+    DASHED_BORDER(R.string.dashed_border),
+    VERTICAL_LINE(R.string.vertical_line),
+    GRAY(R.string.gray),
+    BOLD(R.string.bold),
 }
 
 enum class SaveHistoryMode {

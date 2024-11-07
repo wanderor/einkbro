@@ -43,7 +43,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -54,7 +55,7 @@ import info.plateaukao.einkbro.unit.BackupUnit
 import info.plateaukao.einkbro.unit.BrowserUnit
 import info.plateaukao.einkbro.unit.HelperUnit
 import info.plateaukao.einkbro.unit.IntentUnit
-import info.plateaukao.einkbro.view.NinjaToast
+import info.plateaukao.einkbro.view.EBToast
 import info.plateaukao.einkbro.view.compose.MyTheme
 import info.plateaukao.einkbro.viewmodel.GptQueryViewModel
 import kotlinx.coroutines.Dispatchers
@@ -118,7 +119,7 @@ class GptQueryListActivity : ComponentActivity()  {
                                     showExportFileChooser()
                                 }) {
                                     Icon(
-                                        painterResource(id = R.drawable.icon_export),
+                                        imageVector = ImageVector.vectorResource(id = R.drawable.icon_export),
                                         contentDescription = "Export"
                                     )
                                 }
@@ -144,7 +145,7 @@ class GptQueryListActivity : ComponentActivity()  {
             backupUnit.exportDataToFileUri(contentUri, data)
 
             withContext(Dispatchers.Main) {
-                NinjaToast.show(this@GptQueryListActivity, R.string.toast_backup_successful)
+                EBToast.show(this@GptQueryListActivity, R.string.toast_backup_successful)
                 IntentUnit.showFile(this@GptQueryListActivity, contentUri)
             }
         }
@@ -283,7 +284,7 @@ fun QueryItem(
                         .clickable {
                             onLinkClick()
                         },
-                    painter = painterResource(id = R.drawable.icon_exit),
+                    imageVector = ImageVector.vectorResource(id = R.drawable.icon_exit),
                     contentDescription = "link",
                     tint = MaterialTheme.colors.onBackground
                 )
@@ -300,7 +301,7 @@ fun QueryItem(
                 modifier = Modifier
                     .size(20.dp)
                     .clickable { deleteQuery() },
-                painter = painterResource(id = R.drawable.icon_delete),
+                imageVector = ImageVector.vectorResource(id = R.drawable.icon_delete),
                 contentDescription = "delete",
                 tint = MaterialTheme.colors.onBackground
             )

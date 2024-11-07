@@ -5,6 +5,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Point
 import android.view.ActionMode
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
@@ -102,7 +105,15 @@ class ActionModeMenuViewModel : ViewModel(), KoinComponent {
 
         val menuInfos = resolveInfos.map { it.toMenuInfo(packageManager) }.toMutableList()
 
-        if (configManager.papagoApiSecret.isNotEmpty()) {
+        menuInfos.add(
+            0,
+            MenuInfo(
+                context.getString(R.string.read_from_here),
+                imageVector = Icons.Outlined.RecordVoiceOver,
+                action = { _actionModeMenuState.value = ActionModeMenuState.ReadFromHere }
+            )
+        )
+        if (configManager.imageApiKey.isNotEmpty()) {
             menuInfos.add(
                 0,
                 MenuInfo(
@@ -129,14 +140,16 @@ class ActionModeMenuViewModel : ViewModel(), KoinComponent {
                 action = { _actionModeMenuState.value = ActionModeMenuState.GoogleTranslate }
             )
         )
-        menuInfos.add(
-            0,
-            MenuInfo(
-                context.getString(R.string.deepl_translate),
-                drawable = ContextCompat.getDrawable(context, R.drawable.ic_translate),
-                action = { _actionModeMenuState.value = ActionModeMenuState.DeeplTranslate }
+        if (configManager.imageApiKey.isNotBlank()) {
+            menuInfos.add(
+                0,
+                MenuInfo(
+                    context.getString(R.string.deepl_translate),
+                    drawable = ContextCompat.getDrawable(context, R.drawable.ic_translate),
+                    action = { _actionModeMenuState.value = ActionModeMenuState.DeeplTranslate }
+                )
             )
-        )
+        }
         if (configManager.gptActionList.isNotEmpty()) {
             configManager.gptActionList.mapIndexed { index, actionInfo ->
 
@@ -212,7 +225,7 @@ class ActionModeMenuViewModel : ViewModel(), KoinComponent {
         menuInfos.add(
             MenuInfo(
                 context.getString(R.string.highlight),
-                drawable = ContextCompat.getDrawable(context, R.drawable.ic_highlight),
+                imageVector = Icons.Outlined.EditNote,
                 action = {
                     _actionModeMenuState.value =
                         ActionModeMenuState.HighlightText(configManager.highlightStyle)
@@ -223,9 +236,7 @@ class ActionModeMenuViewModel : ViewModel(), KoinComponent {
                         clickedPoint.value,
                         okAction = { style ->
                             _actionModeMenuState.value = ActionModeMenuState.Idle
-                            if (style != HighlightStyle.BACKGROUND_NONE) {
-                                configManager.highlightStyle = style
-                            }
+                            configManager.highlightStyle = style
                             _actionModeMenuState.value = ActionModeMenuState.HighlightText(style)
                         },
                         onDismissAction = {
@@ -247,6 +258,7 @@ sealed class ActionModeMenuState {
     data object DeeplTranslate : ActionModeMenuState()
     data object Papago : ActionModeMenuState()
     data object Naver : ActionModeMenuState()
+    data object ReadFromHere: ActionModeMenuState()
     class SplitSearch(val stringFormat: String) : ActionModeMenuState()
     class Tts(val text: String) : ActionModeMenuState()
     class HighlightText(val highlightStyle: HighlightStyle) : ActionModeMenuState()

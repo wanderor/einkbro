@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -37,13 +38,12 @@ import androidx.compose.ui.unit.dp
 import androidx.fragment.app.activityViewModels
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.service.GptVoiceOption
-import info.plateaukao.einkbro.service.TranslateRepository
 import info.plateaukao.einkbro.service.TtsManager
 import info.plateaukao.einkbro.tts.entity.VoiceItem
 import info.plateaukao.einkbro.tts.entity.defaultVoiceItem
 import info.plateaukao.einkbro.unit.IntentUnit
 import info.plateaukao.einkbro.unit.ViewUnit
-import info.plateaukao.einkbro.view.NinjaToast
+import info.plateaukao.einkbro.view.EBToast
 import info.plateaukao.einkbro.view.compose.MyTheme
 import info.plateaukao.einkbro.view.compose.SelectableText
 import info.plateaukao.einkbro.view.dialog.TtsLanguageDialog
@@ -59,7 +59,6 @@ import java.util.Locale
 class TtsSettingDialogFragment : ComposeDialogFragment() {
     private val ttsManager: TtsManager by inject()
     private val ttsViewModel: TtsViewModel by activityViewModels()
-    private val translateRepository = TranslateRepository()
 
     override fun setupComposeView() {
         composeView.setContent {
@@ -120,7 +119,7 @@ class TtsSettingDialogFragment : ComposeDialogFragment() {
                         readProgress = readProgress.value.toString(),
                         nextArticleAction = ttsViewModel::nextArticle,
                         gotoSettingAction = { IntentUnit.gotoSystemTtsSettings(requireActivity()) },
-                        stopAction = ttsViewModel::stop,
+                        stopAction = ttsViewModel::reset,
                         pauseOrResumeAction = ttsViewModel::pauseOrResume,
                         addToReadListAction = this@TtsSettingDialogFragment::readCurrentArticle,
                         dismissAction = ::dismiss,
@@ -133,7 +132,7 @@ class TtsSettingDialogFragment : ComposeDialogFragment() {
 
     private fun readCurrentArticle() {
         IntentUnit.readCurrentArticle(requireActivity())
-        NinjaToast.show(requireContext(), R.string.added_to_read_list)
+        EBToast.show(requireContext(), R.string.added_to_read_list)
     }
 }
 
@@ -405,24 +404,24 @@ fun TtsDialogButtonBar(
                         modifier = Modifier.wrapContentWidth()
                     ) {
                         Icon(
-                            if (readingState != PAUSED) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            if (readingState != PAUSED) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                             "pause or resume",
                             tint = MaterialTheme.colors.onBackground
                         )
                     }
                 }
-//                if (showNextButton) {
-//                    IconButton(
-//                        onClick = nextArticleAction,
-//                        modifier = Modifier.wrapContentWidth()
-//                    ) {
-//                        Icon(
-//                            Icons.Outlined.FastForward,
-//                            "Next Article",
-//                            tint = MaterialTheme.colors.onBackground
-//                        )
-//                    }
-//                }
+                if (showNextButton) {
+                    IconButton(
+                        onClick = nextArticleAction,
+                        modifier = Modifier.wrapContentWidth()
+                    ) {
+                        Icon(
+                            Icons.Filled.SkipNext,
+                            "Next Article",
+                            tint = MaterialTheme.colors.onBackground
+                        )
+                    }
+                }
                 IconButton(
                     onClick = stopAction,
                     modifier = Modifier.wrapContentWidth()

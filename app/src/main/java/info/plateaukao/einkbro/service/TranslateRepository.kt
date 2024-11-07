@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.util.Base64
 import android.util.Log
 import info.plateaukao.einkbro.preference.ConfigManager
+import info.plateaukao.einkbro.util.TranslationLanguage
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -36,34 +37,6 @@ import javax.crypto.spec.SecretKeySpec
 class TranslateRepository : KoinComponent {
     private val client = OkHttpClient()
     private val config: ConfigManager by inject()
-
-    suspend fun gTranslateWithWeb(
-        text: String,
-        targetLanguage: String = "en",
-        sourceLanguage: String = "auto",
-    ): String? {
-        return withContext(IO) {
-            val url = HttpUrl.Builder()
-                .scheme("https")
-                .host("translate.google.com")
-                .addPathSegment("m")
-                .addQueryParameter("tl", targetLanguage)
-                .addQueryParameter("sl", sourceLanguage)
-                .addQueryParameter("q", text)
-                .build()
-
-            val request = Request.Builder().url(url).build()
-
-            client.newCall(request).execute().use { response ->
-                val body = response.body?.string() ?: return@use null
-
-                Jsoup.parse(body)
-                    .body()
-                    .getElementsByClass("result-container")
-                    .first()?.text()
-            }
-        }
-    }
 
     private fun getICount(translateText: String): Int {
         return translateText.split("i").size - 1
@@ -98,9 +71,16 @@ class TranslateRepository : KoinComponent {
 
     suspend fun deepLTranslate(
         text: String,
-        targetLanguage: String = "zh",
-        sourceLanguage: String = "auto",
+        targetLanguage: TranslationLanguage,
     ): String? {
+        val target = when (targetLanguage) {
+            TranslationLanguage.ZH_TW,
+            TranslationLanguage.ZH_CN,
+                -> "zh"
+
+            else -> config.translationLanguage.value
+        }
+
         val headers = Headers.Builder()
             .add("content-type", "application/json")
             .build()
@@ -113,8 +93,8 @@ class TranslateRepository : KoinComponent {
             put("params", JSONObject().apply {
                 put("splitting", "newlines")
                 put("lang", JSONObject().apply {
-                    put("source_lang_user_selected", sourceLanguage.uppercase(Locale.getDefault()))
-                    put("target_lang", targetLanguage.uppercase(Locale.getDefault()))
+                    put("source_lang_user_selected", "AUTO")
+                    put("target_lang", target.uppercase(Locale.getDefault()))
                 })
                 put("texts", JSONArray().apply {
                     put(JSONObject().apply {
@@ -138,17 +118,17 @@ class TranslateRepository : KoinComponent {
             .post(body)
             .build()
 
-        return withContext(IO) {
-            client.newCall(request).execute().use { response ->
-                val body = response.body?.string() ?: return@use null
-                try {
+        try {
+            return withContext(IO) {
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string() ?: return@use null
                     val result = JSONObject(body).getJSONObject("result")
                     return@use result.getJSONArray("texts").getJSONObject(0).getString("text")
-                } catch (e: Exception) {
-                    Log.d("TranslateRepository", "deepLTranslate: $e")
-                    return@use null
                 }
             }
+        } catch (e: Exception) {
+            Log.d("TranslateRepository", "deepLTranslate: $e")
+            return null
         }
     }
 
@@ -176,10 +156,10 @@ class TranslateRepository : KoinComponent {
                 .addHeader("Referer", "https://translate.google.com/")
                 .build()
 
-            client.newCall(request).execute().use { response ->
-                val body = response.body?.string() ?: return@use null
+            try {
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string() ?: return@use null
 
-                try {
                     val result = StringBuilder()
                     val array: JSONArray = JSONArray(body).get(0) as JSONArray
                     for (i in 0 until array.length()) {
@@ -187,44 +167,10 @@ class TranslateRepository : KoinComponent {
                         result.append(item[0].toString())
                     }
                     result.toString()
-                } catch (e: Exception) {
-                    null
                 }
-            }
-        }
-    }
-
-    suspend fun pTranslate(
-        text: String,
-        targetLanguage: String = "en",
-        sourceLanguage: String = "auto",
-    ): String? {
-        return withContext(IO) {
-            val request = Request.Builder()
-                .url("https://openapi.naver.com/v1/papago/n2mt")
-                .addHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-                .addHeader("X-Naver-Client-Id", "wCrZZHNa1x_wi8tkGERB")
-                .addHeader("X-Naver-Client-Secret", config.papagoApiSecret)
-                .post(
-                    FormBody.Builder()
-                        .add("source", sourceLanguage)
-                        .add("target", targetLanguage)
-                        .add("text", text)
-                        .build()
-                )
-                .build()
-
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use null
-
-                try {
-                    val body = JSONObject(response.body?.string() ?: return@use null)
-                    body.getJSONObject("message")
-                        .getJSONObject("result")
-                        .getString("translatedText")
-                } catch (e: Exception) {
-                    null
-                }
+            } catch (e: Exception) {
+                Log.e("TranslateRepository", "gTranslateWithApi: $e")
+                ""
             }
         }
     }
@@ -253,13 +199,18 @@ class TranslateRepository : KoinComponent {
     }
 
     private var authKey: String? = null
-    suspend fun ppTranslate(
+    suspend fun pTranslate(
         text: String,
         targetLanguage: String = "en",
         sourceLanguage: String = "auto",
     ): String? {
         if (authKey == null) {
-            authKey = getAuthKey()
+            try {
+                authKey = getAuthKey()
+            } catch (e: Exception) {
+                Log.d("TranslateRepository", "ppTranslate: $e")
+                return ""
+            }
         }
         val key = authKey?.toByteArray(Charsets.UTF_8) ?: return ""
 
@@ -305,51 +256,6 @@ class TranslateRepository : KoinComponent {
             }
         }
     }
-
-    suspend fun pDetectLanguage(text: String): String? {
-        if (authKey == null) {
-            authKey = getAuthKey()
-        }
-        val key = authKey?.toByteArray(Charsets.UTF_8) ?: return ""
-
-        val guid = UUID.randomUUID()
-        val timestamp = System.currentTimeMillis()
-        val code = "$guid\n$DETECT_LANGUAGE_URL\n$timestamp".toByteArray(Charsets.UTF_8)
-        val hmac = Mac.getInstance("HmacMD5")
-        val secretKeySpec = SecretKeySpec(key, "HmacMD5")
-        hmac.init(secretKeySpec)
-        val token = Base64.encodeToString(hmac.doFinal(code), Base64.DEFAULT)
-
-        return withContext(IO) {
-            val request = Request.Builder()
-                .url(DETECT_LANGUAGE_URL)
-                .addHeader("device-type", "pc")
-                .addHeader("x-apigw-partnerid", "papago")
-                .addHeader("Origin", "https://papago.naver.com")
-                .addHeader("Referer", "https://papago.naver.com")
-                .addHeader("Authorization", "PPG $guid:$token".replace("\n", ""))
-                .addHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-                .addHeader("Timestamp", timestamp.toString())
-                .post(
-                    FormBody.Builder()
-                        .add("query", text)
-                        .build()
-                )
-                .build()
-
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use null
-
-                try {
-                    val body = JSONObject(response.body?.string() ?: return@use null)
-                    body.getString("langCode")
-                } catch (e: Exception) {
-                    null
-                }
-            }
-        }
-    }
-
 
     private val sid: String by lazy { "${P_IMAGE_API_VERSION}${UUID.randomUUID()}" }
 
@@ -493,6 +399,6 @@ data class Signature(val ts: Long, val msg: String)
 
 data class ImageTranslateResult(
     val imageId: String,
-    val renderedImage: String
+    val renderedImage: String,
 )
 

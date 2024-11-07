@@ -20,6 +20,8 @@ import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.material.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,11 +29,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.view.compose.MyTheme
 import info.plateaukao.einkbro.view.toolbaricons.ToolbarAction
 import sh.calvin.reorderable.ReorderableItem
@@ -96,7 +98,7 @@ class ToolbarConfigDialogFragment : ComposeDialogFragment() {
                     .filter { it.isAddable }
                     .filterNot { config.toolbarActions.contains(it) }
                     // hide papago action if papago api key is not set
-                    .filterNot { config.papagoApiSecret.isBlank() && it == ToolbarAction.PapagoByParagraph }
+                    .filterNot { config.imageApiKey.isBlank() && it == ToolbarAction.PapagoByParagraph }
                     .map { ToolbarActionItemInfo(it, false) }
 }
 
@@ -122,7 +124,7 @@ private fun ToolbarList(
                 state,
                 key = info.hashCode(),
             ) { isDragging ->
-                val borderWidth = if (isDragging) 1.5.dp else -1.dp
+                val borderWidth = if (isDragging) 1.5.dp else (-1).dp
                 Column(
                     modifier = Modifier
                         .border(
@@ -157,8 +159,8 @@ fun ToolbarToggleItem(
             ToggleItem(
                 state = info.isOn,
                 titleResId = info.toolbarAction.titleResId,
-                iconResId = info.toolbarAction.iconResId,
-                imageVector = info.toolbarAction.imageVector,
+                imageVector = info.toolbarAction.imageVector
+                    ?: ImageVector.vectorResource(id = info.toolbarAction.iconResId),
                 isEnabled = shouldEnableCheckClick,
                 // settings should not be clickable, and always there
                 onClicked = { if (info.toolbarAction != ToolbarAction.Settings) onItemClicked(info.toolbarAction) }
@@ -166,7 +168,7 @@ fun ToolbarToggleItem(
         }
         Icon(
             modifier = modifier.padding(4.dp),
-            painter = painterResource(id = R.drawable.ic_drag), contentDescription = null,
+            imageVector = Icons.Outlined.DragHandle, contentDescription = null,
             tint = MaterialTheme.colors.onBackground
         )
     }

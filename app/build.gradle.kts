@@ -28,8 +28,8 @@ android {
         applicationId = "info.plateaukao.einkbro"
         minSdk = 24
         targetSdk = 34
-        versionCode = 12_00_00
-        versionName = "12.0.0"
+        versionCode = 14_00_00
+        versionName = "14.0.0"
 
         buildConfigField("String", "builtDateTime", "\"${getCurrentTimestamp()}\"")
         buildConfigField("boolean", "showUpdateButton", showUpdateButton())
@@ -79,33 +79,44 @@ android {
 
     lint {
         baseline = file("lint-baseline.xml")
-        //isCheckReleaseBuilds = false
         disable.add("MissingTranslation")
+        checkReleaseBuilds = false
     }
 
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            isUniversalApk = true
+        }
+    }
     namespace = "info.plateaukao.einkbro"
 }
 
 dependencies {
-    implementation("com.google.android.material:material:1.12.0")
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
+
+    implementation(project(":ad-filter"))
+
+    implementation(libs.material)
 
     // epublib
     implementation("com.positiondev.epublib:epublib-core:3.1") {
         exclude(group = "org.slf4j")
         exclude(group = "xmlpull")
     }
-    implementation("org.slf4j:slf4j-api:1.7.32")
-    implementation("net.sf.kxml:kxml2:2.3.0")
-
-    // common lang
-    implementation("org.apache.commons:commons-text:1.9")
+    implementation(libs.slf4j.api)
+    implementation(libs.kxml2)
 
     // for epub saving: html processing
-    implementation("org.jsoup:jsoup:1.15.3")
+    implementation(libs.jsoup)
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+    implementation(project(":ad-filter"))
+    implementation(libs.timber)
     ksp("androidx.room:room-compiler:2.6.1")
 
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
@@ -146,15 +157,19 @@ dependencies {
     // UI Tests
     androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.6.8")
 
-    implementation("com.google.accompanist:accompanist-drawablepainter:0.31.0-alpha")
+    implementation(libs.accompanist.drawablepainter)
 
     // reorder lazylist
-    implementation("sh.calvin.reorderable:reorderable:2.3.1")
+    implementation(libs.reorderable)
 
     // okhttp
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okhttp3:okhttp-sse:4.11.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.sse)
+    implementation(libs.kotlinx.serialization.json)
+
+    // adfilter
+
+    implementation("androidx.work:work-runtime-ktx:2.7.0")
 
     // retrofit
     implementation("com.squareup.retrofit2:retrofit:2.11.0")

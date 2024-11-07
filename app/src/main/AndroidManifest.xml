@@ -31,6 +31,7 @@
         android:name="android.hardware.location.gps"
         android:required="false" />
 
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -211,9 +212,21 @@
         <activity
             android:name=".activity.DataListActivity"
             android:label="@string/setting_title_whitelist" />
-        <activity android:name=".activity.GptActionsActivity" />
-        <activity android:name=".activity.GptQueryListActivity" />
-        <activity android:name=".activity.HighlightsActivity" />
+        <activity
+            android:name=".activity.GptActionsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".activity.GptQueryListActivity"
+            android:exported="false" />
+        <activity
+            android:name=".activity.HighlightsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".activity.ToolbarConfigActivity"
+            android:exported="false" />
+        <activity
+            android:name=".activity.AdBlockSettingActivity"
+            android:exported="false" />
 
         <service
             android:name=".service.ClearService"

@@ -1,5 +1,6 @@
 package info.plateaukao.einkbro.viewmodel
 
+import android.graphics.Bitmap
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
@@ -39,6 +40,16 @@ class BookmarkViewModel(private val bookmarkManager: BookmarkManager) : ViewMode
         }
     }
 
+    fun deleteBookmark(bookmark: Bookmark) {
+        viewModelScope.launch {
+            bookmarkManager.delete(bookmark)
+            updateUiState()
+        }
+    }
+
+    fun getFavicon(bookmark: Bookmark): Bitmap? =
+        bookmarkManager.findFaviconBy(bookmark.url)?.getBitmap()
+
     fun toRootFolder() {
         while (folderStack.size > 1) {
             folderStack.pop()
@@ -58,10 +69,11 @@ class BookmarkViewModel(private val bookmarkManager: BookmarkManager) : ViewMode
         updateUiState()
     }
 
-    fun insertBookmark(bookmark: Bookmark) {
+    fun insertBookmark(bookmark: Bookmark, doneAction: (() -> Unit)? = null) {
         viewModelScope.launch {
             bookmarkManager.insert(bookmark)
             updateUiState()
+            doneAction?.invoke()
         }
     }
 

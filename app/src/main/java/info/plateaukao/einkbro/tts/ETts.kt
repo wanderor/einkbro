@@ -10,7 +10,6 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Arrays
 import java.util.Date
@@ -43,32 +42,18 @@ class ETts {
 
     suspend fun tts(voice: VoiceItem, speed: Int, content: String): ByteArray? =
         suspendCoroutine { continuation ->
+            var isResumed = false
+
             val processedContent = removeIncompatibleCharacters(content)
             if (processedContent.isNullOrBlank()) {
                 continuation.resume(null)
-            }
-            val storageFolder = File(storage)
-            if (!storageFolder.exists()) {
-                storageFolder.mkdirs()
             }
 
             val dateStr = dateToString(Date())
             val reqId = uuid()
             val audioFormat = mkAudioFormat(dateStr, FORMAT)
-            val ssml = mkssml(
-                voice.locale,
-                voice.name,
-                processedContent,
-                "+0Hz",
-                "+${speed - 100}%",
-                "+0%"
-            )
+            val ssml = mkssml(voice.locale, voice.name, processedContent, "+0Hz", "+${speed - 100}%", "+0%")
             val ssmlHeadersPlusData = ssmlHeadersPlusData(reqId, dateStr, ssml)
-
-            val storageFile = File(storage)
-            if (!storageFile.exists()) {
-                storageFile.mkdirs()
-            }
 
             val request = Request.Builder()
                 .url("wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4")
@@ -80,20 +65,28 @@ class ETts {
                     request,
                     object : TTSWebSocketListener() {
                         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                            Log.d("TTSWebSocketListener", "onClosed: $code, $reason")
+                            isResumed = true
                             continuation.resume(byteArray)
                         }
                         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                             super.onFailure(webSocket, t, response)
                             response?.close()
                             Log.d("TTSWebSocketListener", "onFailure: ${t.message}")
-                            continuation.resume(null)
+                            if (isResumed.not()) {
+                                isResumed = true
+                                continuation.resume(null)
+                            }
                         }
                     })
                 client.send(audioFormat)
                 client.send(ssmlHeadersPlusData)
             } catch (e: Throwable) {
                 e.printStackTrace()
-                continuation.resume(null)
+                if (isResumed.not()) {
+                    isResumed = true
+                    continuation.resume(null)
+                }
             }
         }
 

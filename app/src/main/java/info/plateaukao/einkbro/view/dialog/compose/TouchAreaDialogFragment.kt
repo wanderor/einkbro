@@ -22,8 +22,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -154,32 +155,26 @@ fun TouchAreaContent(
         ToggleItem(
             state = showHint,
             titleResId = R.string.show_touch_area_hint,
-            iconResId = -1,
             onClicked = { onShowHintClick() })
         ToggleItem(
             state = hideTouchWhenType,
             titleResId = R.string.hie_touch_area_when_input,
-            iconResId = -1,
             onClicked = { onHideWhenTypeClick() })
         ToggleItem(
             state = switchTouchArea,
             titleResId = R.string.switch_touch_area_action,
-            iconResId = -1,
             onClicked = { onSwitchAreaClick() })
         ToggleItem(
             state = enableTouchAreaAsArrowKey,
             titleResId = R.string.enable_touch_area_as_arrow_key,
-            iconResId = -1,
             onClicked = { onAsArrowKeyClick() })
         ToggleItem(
             state = shouldSendPageKey,
             titleResId = R.string.enable_touch_area_as_page_key,
-            iconResId = -1,
             onClicked = { onAsPageKeyClick() })
         ToggleItem(
             state = tryFixScroll,
             titleResId = R.string.enable_fix_scroll,
-            iconResId = -1,
             onClicked = { onTryFixScrollClick() })
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -248,7 +243,7 @@ fun TouchAreaItem(
         verticalArrangement = Arrangement.Center,
     ) {
         Icon(
-            painter = painterResource(id = iconResId),
+            imageVector = ImageVector.vectorResource(id = iconResId),
             contentDescription = null,
             modifier = Modifier
                 .height(80.dp)
@@ -292,7 +287,7 @@ fun ActionItem(
             color = MaterialTheme.colors.onBackground,
         )
         Icon(
-            painter = painterResource(id = R.drawable.icon_arrow_right_gest),
+            imageVector = ImageVector.vectorResource(id = R.drawable.icon_arrow_right_gest),
             contentDescription = null,
             tint = MaterialTheme.colors.onBackground
         )

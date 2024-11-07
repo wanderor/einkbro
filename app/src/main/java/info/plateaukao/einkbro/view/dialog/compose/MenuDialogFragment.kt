@@ -8,6 +8,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -28,6 +29,7 @@ import androidx.compose.material.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.automirrored.outlined.ChromeReaderMode
+import androidx.compose.material.icons.automirrored.outlined.Feed
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.material.icons.automirrored.outlined.Logout
@@ -36,11 +38,13 @@ import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.outlined.AddHome
 import androidx.compose.material.icons.outlined.AddLink
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.BookmarkAdd
-import androidx.compose.material.icons.outlined.BorderColor
 import androidx.compose.material.icons.outlined.CancelPresentation
 import androidx.compose.material.icons.outlined.CopyAll
+import androidx.compose.material.icons.outlined.Copyright
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.FormatSize
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.InstallMobile
@@ -58,6 +62,7 @@ import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.outlined.ViewColumn
 import androidx.compose.material.icons.outlined.ViewStream
+import androidx.compose.material.icons.twotone.Copyright
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,8 +72,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -162,7 +167,7 @@ private fun MenuItems(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            MenuItem(R.string.menu_highlights, 0, Icons.Outlined.BorderColor) {
+            MenuItem(R.string.menu_highlights, 0, Icons.Outlined.EditNote) {
                 onClicked(MenuItemType.Highlights)
             }
             MenuItem(R.string.menu_fav, 0, Icons.Outlined.AddHome) { onClicked(MenuItemType.SetHome) }
@@ -240,15 +245,15 @@ private fun MenuItems(
                     R.string.menu_add_to_pocket,
                     R.drawable.ic_pocket
                 ) { onClicked(AddToPocket) }
-                MenuItem(R.string.menu_save_epub, R.drawable.ic_book) { onClicked(SaveEpub) }
-                MenuItem(R.string.copy_link, R.drawable.ic_copy) { onClicked(CopyLink) }
+                MenuItem(R.string.menu_save_epub, Icons.AutoMirrored.Outlined.Feed) { onClicked(SaveEpub) }
+                MenuItem(R.string.copy_link, Icons.Outlined.CopyAll) { onClicked(CopyLink) }
                 MenuItem(
                     R.string.menu_share_link,
-                    R.drawable.icon_menu_share
+                    Icons.Outlined.Share
                 ) { onClicked(ShareLink) }
                 MenuItem(
                     R.string.menu_expand_menu,
-                    R.drawable.icon_arrow_right_gest,
+                    Icons.AutoMirrored.Outlined.KeyboardArrowRight
                 ) { currentShowShare = true; toggleShareSaveMenu() }
             }
         }
@@ -318,7 +323,7 @@ private fun MenuItems(
                     if (hasWhiteBkd) R.drawable.ic_white_background_active else R.drawable.ic_white_background
                 MenuItem(R.string.white_background, whiteRes) { onClicked(MenuItemType.WhiteBknd) }
                 val blackRes =
-                    if (blackFont) R.drawable.ic_black_font_on else R.drawable.ic_black_font_off
+                    if (blackFont) Icons.TwoTone.Copyright else Icons.Outlined.Copyright
                 MenuItem(R.string.black_font, blackRes) { onClicked(MenuItemType.BlackFont) }
                 val boldRes =
                     if (boldFont) R.drawable.ic_bold_font_active else R.drawable.ic_bold_font
@@ -458,7 +463,7 @@ fun MenuItem(
                 )
             } else {
                 Icon(
-                    painter = painterResource(id = iconResId), contentDescription = null,
+                    imageVector = ImageVector.vectorResource(id = iconResId), contentDescription = null,
                     modifier = Modifier
                         .size(if (isLargeType) 55.dp else 44.dp)
                         .padding(horizontal = 6.dp),
@@ -466,17 +471,24 @@ fun MenuItem(
                 )
             }
         }
-        Text(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset(y = if (showIcon) (-5).dp else 0.dp),
-            text = stringResource(id = titleResId),
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            lineHeight = if (!showIcon) 20.sp else 12.sp,
-            fontSize = fontSize,
-            color = MaterialTheme.colors.onBackground
-        )
+                .height(40.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset(y = if (showIcon) (-5).dp else 10.dp),
+                text = stringResource(id = titleResId),
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                lineHeight = if (!showIcon) 20.sp else 12.sp,
+                fontSize = fontSize,
+                color = MaterialTheme.colors.onBackground
+            )
+        }
     }
 }
 
@@ -485,8 +497,8 @@ fun MenuItem(
 private fun PreviewItem() {
     MyTheme {
         Column {
-            MenuItem(R.string.title_appData, R.drawable.ic_copy, showIcon = false) {}
-            MenuItem(R.string.title, R.drawable.ic_location) {}
+            MenuItem(R.string.title_appData, Icons.Outlined.Backup, showIcon = false) {}
+            MenuItem(R.string.title, 0, Icons.Outlined.Translate) {}
         }
     }
 }

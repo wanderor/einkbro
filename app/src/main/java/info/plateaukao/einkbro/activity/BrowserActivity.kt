@@ -1,5 +1,6 @@
 package info.plateaukao.einkbro.activity
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE
@@ -14,6 +15,7 @@ import android.content.Intent.ACTION_VIEW
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Point
 import android.graphics.PorterDuff
@@ -50,6 +52,7 @@ import android.widget.TextView
 import android.widget.VideoView
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +62,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.get
 import androidx.core.view.isVisible
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
@@ -95,12 +99,13 @@ import info.plateaukao.einkbro.unit.IntentUnit
 import info.plateaukao.einkbro.unit.LocaleManager
 import info.plateaukao.einkbro.unit.ShareUtil
 import info.plateaukao.einkbro.unit.ViewUnit
+import info.plateaukao.einkbro.unit.pruneWebTitle
 import info.plateaukao.einkbro.unit.toRawPoint
 import info.plateaukao.einkbro.util.Constants.Companion.ACTION_DICT
 import info.plateaukao.einkbro.util.TranslationLanguage
 import info.plateaukao.einkbro.view.MultitouchListener
-import info.plateaukao.einkbro.view.NinjaToast
-import info.plateaukao.einkbro.view.NinjaWebView
+import info.plateaukao.einkbro.view.EBToast
+import info.plateaukao.einkbro.view.EBWebView
 import info.plateaukao.einkbro.view.SwipeTouchListener
 import info.plateaukao.einkbro.view.dialog.BookmarkEditDialog
 import info.plateaukao.einkbro.view.dialog.DialogManager
@@ -133,6 +138,7 @@ import info.plateaukao.einkbro.view.viewControllers.FabImageViewController
 import info.plateaukao.einkbro.view.viewControllers.OverviewDialogController
 import info.plateaukao.einkbro.view.viewControllers.TouchAreaViewController
 import info.plateaukao.einkbro.view.viewControllers.TwoPaneController
+import info.plateaukao.einkbro.viewmodel.ActionModeMenuState
 import info.plateaukao.einkbro.viewmodel.ActionModeMenuState.DeeplTranslate
 import info.plateaukao.einkbro.viewmodel.ActionModeMenuState.GoogleTranslate
 import info.plateaukao.einkbro.viewmodel.ActionModeMenuState.Gpt
@@ -157,6 +163,8 @@ import info.plateaukao.einkbro.viewmodel.SplitSearchViewModel
 import info.plateaukao.einkbro.viewmodel.TRANSLATE_API
 import info.plateaukao.einkbro.viewmodel.TranslationViewModel
 import info.plateaukao.einkbro.viewmodel.TtsViewModel
+import io.github.edsuns.adfilter.AdFilter
+import io.github.edsuns.adfilter.FilterViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
@@ -171,7 +179,7 @@ import kotlin.math.roundToInt
 
 open class BrowserActivity : FragmentActivity(), BrowserController {
     private lateinit var progressBar: ProgressBar
-    protected lateinit var ninjaWebView: NinjaWebView
+    protected lateinit var ebWebView: EBWebView
     protected open var shouldRunClearService: Boolean = true
 
     private var videoView: VideoView? = null
@@ -200,7 +208,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private val externalSearchViewModel: ExternalSearchViewModel by viewModels()
 
     private fun prepareRecord(): Boolean {
-        val webView = currentAlbumController as NinjaWebView
+        val webView = currentAlbumController as EBWebView
         val title = webView.title
         val url = webView.url
         return (title.isNullOrEmpty() || url.isNullOrEmpty()
@@ -226,7 +234,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private var shouldLoadTabState: Boolean = false
 
     private val toolbarActionHandler: ToolbarActionHandler by lazy {
-        ToolbarActionHandler(this)
+        ToolbarActionHandler(this, ebWebView)
     }
 
     private val albumViewModel: AlbumViewModel by viewModels()
@@ -256,22 +264,22 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         NewTabBehavior.SHOW_HOME -> addAlbum("", config.favoriteUrl)
         NewTabBehavior.SHOW_RECENT_BOOKMARKS -> {
             addAlbum("", "")
-            BrowserUnit.loadRecentlyUsedBookmarks(ninjaWebView)
+            BrowserUnit.loadRecentlyUsedBookmarks(ebWebView)
         }
     }
 
     override fun duplicateTab() {
-        val webView = currentAlbumController as NinjaWebView
+        val webView = currentAlbumController as EBWebView
         val title = webView.title.orEmpty()
         val url = webView.url ?: return
         addAlbum(title, url)
     }
 
     override fun refreshAction() {
-        if (ninjaWebView.isLoadFinish && ninjaWebView.url?.isNotEmpty() == true) {
-            ninjaWebView.reload()
+        if (ebWebView.isLoadFinish && ebWebView.url?.isNotEmpty() == true) {
+            ebWebView.reload()
         } else {
-            ninjaWebView.stopLoading()
+            ebWebView.stopLoading()
         }
     }
 
@@ -308,10 +316,15 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         }
     }
 
+    private val adFilter: AdFilter = AdFilter.get()
+    private val filterViewModel: FilterViewModel = adFilter.viewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // workaround for crash issue
         // Caused by java.lang.NoSuchMethodException:
         super.onCreate(null)
+
+        //android.os.Debug.waitForDebugger()
 
         binding = ActivityMainBinding.inflate(layoutInflater)
 
@@ -376,11 +389,67 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         baiduSyncer = BaiduSyncer(
             this, mainContentLayout, browserContainer, this,
             openUrls, activityResultRegistry)
+
+        // post delay to update filter list
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            // 如果沒有獲得權限，請求權限
+            requestNotificationPermission()
+        }
+        binding.root.postDelayed({
+            checkAdBlockerList()
+        }, 1000)
+    }
+
+    private fun checkAdBlockerList() {
+        if (!adFilter.hasInstallation) {
+            val map = mapOf(
+                "AdGuard Base" to "https://filters.adtidy.org/extension/chromium/filters/2.txt",
+                "EasyPrivacy Lite" to "https://filters.adtidy.org/extension/chromium/filters/118_optimized.txt",
+                "AdGuard Tracking Protection" to "https://filters.adtidy.org/extension/chromium/filters/3.txt",
+                "AdGuard Annoyances" to "https://filters.adtidy.org/extension/chromium/filters/14.txt",
+                "AdGuard Chinese" to "https://filters.adtidy.org/extension/chromium/filters/224.txt",
+                "NoCoin Filter List" to "https://filters.adtidy.org/extension/chromium/filters/242.txt"
+            )
+            for ((key, value) in map) {
+                filterViewModel.addFilter(key, value)
+            }
+            val filters = filterViewModel.filters.value
+            for ((key, _) in filters) {
+                filterViewModel.download(key)
+            }
+//            AlertDialog.Builder(this)
+////                .setTitle(R.string.filter_download_title)
+////                .setMessage(R.string.filter_download_msg)
+//                .setTitle("Filter Download")
+//                .setMessage("Download filters to block ads")
+//                .setCancelable(true)
+//                .setPositiveButton(
+//                    android.R.string.ok
+//                ) { _, _ ->
+//                    val filters = filterViewModel.filters.value ?: return@setPositiveButton
+//                    for ((key, _) in filters) {
+//                        filterViewModel.download(key)
+//                    }
+//                }
+//                .show()
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        val requestPermissionLauncher =
+            registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
+                if (isGranted) {
+                } else {
+                }
+            }
+
+        // 發起權限請求
+        requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun initTtsViewModel() {
         lifecycleScope.launch {
-            ttsViewModel.speakingState.collect { _ ->
+            ttsViewModel.readingState.collect { _ ->
                 composeToolbarViewController.updateIcons()
             }
         }
@@ -439,7 +508,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 text = action.title.take(2).uppercase(Locale.getDefault())
                 setOnClickListener {
                     externalSearchViewModel.currentSearchAction = action
-                    ninjaWebView.loadUrl(
+                    ebWebView.loadUrl(
                         externalSearchViewModel.generateSearchUrl(
                             splitSearchItemInfo = action
                         )
@@ -501,6 +570,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                             actionModeMenuViewModel.finish()
                         }
                     }
+                    
+                    is ActionModeMenuState.ReadFromHere -> readFromThisSentence()
 
                     is Gpt -> {
                         val gptAction = config.gptActionList[state.gptActionIndex]
@@ -508,11 +579,11 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                             updateTranslationInput()
                             if (translationViewModel.hasOpenAiApiKey()) {
                                 translationViewModel.setupGptAction(gptAction)
-                                translationViewModel.url = ninjaWebView.url.orEmpty()
+                                translationViewModel.url = getFocusedWebView().url.orEmpty()
 
                                 showTranslationDialog()
                             } else {
-                                NinjaToast.show(this@BrowserActivity, R.string.gpt_api_key_not_set)
+                                EBToast.show(this@BrowserActivity, R.string.gpt_api_key_not_set)
                             }
                             actionModeMenuViewModel.finish()
                         }
@@ -531,8 +602,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                         actionModeMenuViewModel.finish()
                     }
 
-                    is SelectSentence -> ninjaWebView.selectSentence(longPressPoint)
-                    is SelectParagraph -> ninjaWebView.selectParagraph(longPressPoint)
+                    is SelectSentence -> getFocusedWebView().selectSentence(longPressPoint)
+                    is SelectParagraph -> getFocusedWebView().selectParagraph(longPressPoint)
 
                     Idle -> Unit
                 }
@@ -569,28 +640,39 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         }
     }
 
+    private fun readFromThisSentence() {
+        lifecycleScope.launch {
+            val selectedSentence = ebWebView.getSelectedText()
+            val fullText = ebWebView.getRawText()
+            // read from selected sentence to the end of the article
+            val startIndex = fullText.indexOf(selectedSentence)
+            ttsViewModel.readArticle(fullText.substring(startIndex))
+        }
+    }
+
     private suspend fun updateTranslationInput() {
+        // need to handle where data is from: ebWebView or twoPaneController.getSecondWebView()
         with(translationViewModel) {
             updateInputMessage(actionModeMenuViewModel.selectedText.value)
-            updateMessageWithContext(ninjaWebView.getSelectedTextWithContext())
-            url = ninjaWebView.url.orEmpty()
+            updateMessageWithContext(getFocusedWebView().getSelectedTextWithContext())
+            url = getFocusedWebView().url.orEmpty()
         }
     }
 
     private suspend fun highlightText(highlightStyle: HighlightStyle) {
+        val focusedWebView = getFocusedWebView()
         // work on UI first
-        ninjaWebView.highlightTextSelection(highlightStyle)
+        focusedWebView.highlightTextSelection(highlightStyle)
 
         // work on db saving
-        val url = ninjaWebView.url.orEmpty()
-        val title = ninjaWebView.title.orEmpty()
+        val url = focusedWebView.url.orEmpty()
+        val title = focusedWebView.title.orEmpty()
         val article = Article(title, url, System.currentTimeMillis(), "")
 
         val articleInDb =
             bookmarkManager.getArticleByUrl(url) ?: bookmarkManager.insertArticle(article)
 
         val selectedText = actionModeMenuViewModel.selectedText.value
-            .replace("\\\"", "\"")
         val highlight = Highlight(articleInDb.id, selectedText)
         bookmarkManager.insertHighlight(highlight)
     }
@@ -611,8 +693,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 val translationLanguage =
                     TranslationLanguageDialog(this@BrowserActivity).show() ?: return@launch
                 translationViewModel.updateTranslationLanguage(translationLanguage)
-                ninjaWebView.clearTranslationElements()
-                translateByParagraph(ninjaWebView.translateApi)
+                ebWebView.clearTranslationElements()
+                translateByParagraph(ebWebView.translateApi)
             }
         }
         languageLabelView?.setOnLongClickListener {
@@ -621,23 +703,23 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         }
     }
 
-    override fun isAtTop(): Boolean = ninjaWebView.isAtTop()
-    override fun jumpToTop() = ninjaWebView.jumpToTop()
-    override fun jumpToBottom() = ninjaWebView.jumpToBottom()
-    override fun pageDown() = ninjaWebView.pageDownWithNoAnimation()
-    override fun pageUp() = ninjaWebView.pageUpWithNoAnimation()
-    override fun toggleReaderMode() = ninjaWebView.toggleReaderMode()
-    override fun toggleVerticalRead() = ninjaWebView.toggleVerticalRead()
+    override fun isAtTop(): Boolean = ebWebView.isAtTop()
+    override fun jumpToTop() = ebWebView.jumpToTop()
+    override fun jumpToBottom() = ebWebView.jumpToBottom()
+    override fun pageDown() = ebWebView.pageDownWithNoAnimation()
+    override fun pageUp() = ebWebView.pageUpWithNoAnimation()
+    override fun toggleReaderMode() = ebWebView.toggleReaderMode()
+    override fun toggleVerticalRead() = ebWebView.toggleVerticalRead()
     override fun updatePageInfo(info: String) = composeToolbarViewController.updatePageInfo(info)
 
-    override fun sendPageUpKey() = ninjaWebView.sendPageUpKey()
-    override fun sendPageDownKey() = ninjaWebView.sendPageDownKey()
+    override fun sendPageUpKey() = ebWebView.sendPageUpKey()
+    override fun sendPageDownKey() = ebWebView.sendPageDownKey()
     override fun sendLeftKey() {
-        ninjaWebView.dispatchKeyEvent(KeyEvent(ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT))
+        ebWebView.dispatchKeyEvent(KeyEvent(ACTION_DOWN, KeyEvent.KEYCODE_DPAD_LEFT))
     }
 
     override fun sendRightKey() {
-        ninjaWebView.dispatchKeyEvent(KeyEvent(ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT))
+        ebWebView.dispatchKeyEvent(KeyEvent(ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT))
     }
 
     override fun addToPocket(url: String) {
@@ -653,7 +735,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 }
 
                 is PocketShareState.NeedLogin -> addNewTab(sharedState.authUrl)
-                PocketShareState.Failed -> NinjaToast.showShort(this@BrowserActivity, "Failed")
+                PocketShareState.Failed -> EBToast.showShort(this@BrowserActivity, "Failed")
                 PocketShareState.SharedByPocketApp -> Unit // done by pocket app
             }
         }
@@ -669,11 +751,11 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     override fun translate(translationMode: TranslationMode) {
         when (translationMode) {
             TranslationMode.TRANSLATE_BY_PARAGRAPH -> translateByParagraph(TRANSLATE_API.GOOGLE)
-
             TranslationMode.PAPAGO_TRANSLATE_BY_PARAGRAPH -> translateByParagraph(TRANSLATE_API.PAPAGO)
+            TranslationMode.DEEPL_BY_PARAGRAPH -> translateByParagraph(TRANSLATE_API.DEEPL)
 
             TranslationMode.PAPAGO_TRANSLATE_BY_SCREEN -> translateWebView()
-            TranslationMode.GOOGLE_IN_PLACE -> ninjaWebView.addGoogleTranslation()
+            TranslationMode.GOOGLE_IN_PLACE -> ebWebView.addGoogleTranslation()
             else -> Unit
         }
     }
@@ -686,8 +768,10 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         LanguageSettingDialogFragment(translateApi, translationViewModel) {
             if (translateApi == TRANSLATE_API.GOOGLE) {
                 translateByParagraph(TRANSLATE_API.GOOGLE)
-            } else {
+            } else if (translateApi == TRANSLATE_API.PAPAGO) {
                 translateByParagraph(TRANSLATE_API.PAPAGO)
+            } else if (translateApi == TRANSLATE_API.DEEPL) {
+                translateByParagraph(TRANSLATE_API.DEEPL)
             }
         }
             .show(supportFragmentManager, "LanguageSettingDialog")
@@ -700,7 +784,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             config.fontBoldness,
             okAction = { changedBoldness ->
                 config.fontBoldness = changedBoldness
-                ninjaWebView.applyFontBoldness()
+                ebWebView.applyFontBoldness()
             }
         ).show(supportFragmentManager, "FontBoldnessDialog")
     }
@@ -712,7 +796,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     override fun sendToRemote(text: String) {
         if (remoteConnViewModel.isSendingTextSearch) {
             remoteConnViewModel.toggleTextSearch()
-            NinjaToast.show(this, R.string.send_to_remote_terminate)
+            EBToast.show(this, R.string.send_to_remote_terminate)
             return
         }
 
@@ -722,11 +806,11 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     override fun summarizeContent() {
         if (translationViewModel.hasOpenAiApiKey()) {
             lifecycleScope.launch {
-                translationViewModel.url = ninjaWebView.url.orEmpty()
-                val isSuccess = translationViewModel.setupTextSummary(ninjaWebView.getRawText())
+                translationViewModel.url = ebWebView.url.orEmpty()
+                val isSuccess = translationViewModel.setupTextSummary(ebWebView.getRawText())
 
                 if (!isSuccess) {
-                    NinjaToast.show(this@BrowserActivity, R.string.gpt_api_key_not_set)
+                    EBToast.show(this@BrowserActivity, R.string.gpt_api_key_not_set)
                     return@launch
                 }
 
@@ -769,21 +853,21 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         if (remoteConnViewModel.isReceivingLink) {
             remoteConnViewModel.toggleReceiveLink {}
         } else {
-            remoteConnViewModel.toggleReceiveLink { ninjaWebView.loadUrl(it) }
+            remoteConnViewModel.toggleReceiveLink { ebWebView.loadUrl(it) }
         }
     }
 
     override fun toggleReceiveLink() {
         if (remoteConnViewModel.isReceivingLink) {
             remoteConnViewModel.toggleReceiveLink {}
-            NinjaToast.show(this, R.string.receive_link_terminate)
+            EBToast.show(this, R.string.receive_link_terminate)
             return
         }
 
         ReceiveDataDialog(this@BrowserActivity, lifecycleScope).show {
             ShareUtil.startReceiving(lifecycleScope) { url ->
                 if (url.isNotBlank()) {
-                    ninjaWebView.loadUrl(url)
+                    ebWebView.loadUrl(url)
                     ShareUtil.stopBroadcast()
                 }
             }
@@ -817,7 +901,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     private fun handleFontSelectionResult(result: ActivityResult) {
         if (result.resultCode != RESULT_OK) return
-        BrowserUnit.handleFontSelectionResult(this, result, ninjaWebView.shouldUseReaderFont())
+        BrowserUnit.handleFontSelectionResult(this, result, ebWebView.shouldUseReaderFont())
     }
 
     private fun handleWebViewFileChooser(result: ActivityResult) {
@@ -843,7 +927,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         epubManager.saveEpub(
             this,
             uri,
-            ninjaWebView,
+            ebWebView,
             {
                 progressDialog.progress = it
                 if (it == 100) {
@@ -870,7 +954,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private fun saveWebArchiveToUri(uri: Uri) {
         // get archive from webview
         val filePath = File(filesDir.absolutePath + "/temp.mht").absolutePath
-        ninjaWebView.saveWebArchive(filePath, false) {
+        ebWebView.saveWebArchive(filePath, false) {
             val tempFile = File(filePath)
             contentResolver.openOutputStream(uri)?.use { outputStream ->
                 tempFile.inputStream().use { inputStream ->
@@ -970,22 +1054,22 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         if (config.customFontChanged &&
             (config.fontType == FontType.CUSTOM || config.readerFontType == FontType.CUSTOM)
         ) {
-            if (!ninjaWebView.shouldUseReaderFont()) {
-                ninjaWebView.reload()
+            if (!ebWebView.shouldUseReaderFont()) {
+                ebWebView.reload()
             } else {
-                ninjaWebView.updateCssStyle()
+                ebWebView.updateCssStyle()
             }
             config.customFontChanged = false
         }
         if (!config.continueMedia) {
-            if (this::ninjaWebView.isInitialized) {
-                ninjaWebView.resumeTimers()
+            if (this::ebWebView.isInitialized) {
+                ebWebView.resumeTimers()
             }
         }
     }
 
     override fun onDestroy() {
-        ttsViewModel.stop()
+        ttsViewModel.reset()
 
         updateSavedAlbumInfo()
 
@@ -1002,11 +1086,11 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_DOWN -> {
-                if (config.useUpDownPageTurn) ninjaWebView.pageDownWithNoAnimation()
+                if (config.useUpDownPageTurn) ebWebView.pageDownWithNoAnimation()
             }
 
             KeyEvent.KEYCODE_DPAD_UP -> {
-                if (config.useUpDownPageTurn) ninjaWebView.pageUpWithNoAnimation()
+                if (config.useUpDownPageTurn) ebWebView.pageUpWithNoAnimation()
             }
 
             KeyEvent.KEYCODE_VOLUME_DOWN -> return handleVolumeDownKey()
@@ -1024,10 +1108,10 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     private fun handleVolumeDownKey(): Boolean {
         return if (config.volumePageTurn) {
-            if (ninjaWebView.isVerticalRead) {
-                ninjaWebView.pageUpWithNoAnimation()
+            if (ebWebView.isVerticalRead) {
+                ebWebView.pageUpWithNoAnimation()
             } else {
-                ninjaWebView.pageDownWithNoAnimation()
+                ebWebView.pageDownWithNoAnimation()
             }
             true
         } else {
@@ -1037,10 +1121,10 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     private fun handleVolumeUpKey(): Boolean {
         return if (config.volumePageTurn) {
-            if (ninjaWebView.isVerticalRead) {
-                ninjaWebView.pageDownWithNoAnimation()
+            if (ebWebView.isVerticalRead) {
+                ebWebView.pageDownWithNoAnimation()
             } else {
-                ninjaWebView.pageUpWithNoAnimation()
+                ebWebView.pageUpWithNoAnimation()
             }
             true
         } else {
@@ -1061,13 +1145,13 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             composeToolbarViewController.show()
         } else {
             // disable back key when it's translate mode web page
-            if (!ninjaWebView.isTranslatePage && ninjaWebView.canGoBack()) {
-                ninjaWebView.goBack()
+            if (!ebWebView.isTranslatePage && ebWebView.canGoBack()) {
+                ebWebView.goBack()
             } else {
                 if (config.closeTabWhenNoMoreBackHistory) {
                     removeAlbum()
                 } else {
-                    NinjaToast.show(this, getString(R.string.no_previous_page))
+                    EBToast.show(this, getString(R.string.no_previous_page))
                 }
             }
         }
@@ -1080,8 +1164,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         if (currentAlbumController != null) {
             if (currentAlbumController == controller) {
                 // if it's the same controller, just scroll to top
-                if (ninjaWebView.isAtTop()) {
-                    ninjaWebView.reload()
+                if (ebWebView.isAtTop()) {
+                    ebWebView.reload()
                 } else {
                     jumpToTop()
                 }
@@ -1116,10 +1200,10 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         updateWebViewCount()
 
         progressBar.visibility = GONE
-        ninjaWebView = controller as NinjaWebView
+        ebWebView = controller as EBWebView
 
         updateTitle()
-        ninjaWebView.updatePageInfo()
+        ebWebView.updatePageInfo()
 
         // when showing a new album, should turn off externalSearch button visibility
         externalSearchViewModel.setButtonVisibility(false)
@@ -1133,7 +1217,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     private fun updateLanguageLabel() {
         languageLabelView?.visibility =
-            if (ninjaWebView.isTranslatePage || ninjaWebView.isTranslateByParagraph) VISIBLE else GONE
+            if (ebWebView.isTranslatePage || ebWebView.isTranslateByParagraph) VISIBLE else GONE
     }
 
     private fun openCustomFontPicker() = BrowserUnit.openFontFilePicker(customFontResultLauncher)
@@ -1145,38 +1229,38 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     override fun rotateScreen() = IntentUnit.rotateScreen(this)
 
     override fun saveBookmark(url: String?, title: String?) {
-        val currentUrl = url ?: ninjaWebView.url ?: return
-        val nonNullTitle = title ?: HelperUnit.secString(ninjaWebView.title)
+        val currentUrl = url ?: ebWebView.url ?: return
+        var nonNullTitle = title ?: HelperUnit.secString(ebWebView.title)
         try {
             lifecycleScope.launch {
                 BookmarkEditDialog(
                     this@BrowserActivity,
                     bookmarkViewModel,
-                    Bookmark(nonNullTitle, currentUrl),
+                    Bookmark(nonNullTitle.pruneWebTitle(), currentUrl),
                     {
                         handleBookmarkSync(true)
                         ViewUnit.hideKeyboard(this@BrowserActivity)
-                        NinjaToast.show(this@BrowserActivity, R.string.toast_edit_successful)
+                        EBToast.show(this@BrowserActivity, R.string.toast_edit_successful)
                     },
                     { ViewUnit.hideKeyboard(this@BrowserActivity) }
                 ).show()
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            NinjaToast.show(this, R.string.toast_error)
+            EBToast.show(this, R.string.toast_error)
         }
     }
 
     override fun createShortcut() {
-        val currentUrl = ninjaWebView.url ?: return
+        val currentUrl = ebWebView.url ?: return
         ShortcutEditDialog(
             this@BrowserActivity,
-            HelperUnit.secString(ninjaWebView.title),
+            HelperUnit.secString(ebWebView.title),
             currentUrl,
-            ninjaWebView.favicon,
+            ebWebView.favicon,
             {
                 ViewUnit.hideKeyboard(this)
-                NinjaToast.show(this@BrowserActivity, R.string.toast_edit_successful)
+                EBToast.show(this@BrowserActivity, R.string.toast_edit_successful)
             },
             { ViewUnit.hideKeyboard(this) }
         ).show()
@@ -1190,7 +1274,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     // Methods
     override fun showFontSizeChangeDialog() {
-        if (ninjaWebView.shouldUseReaderFont()) {
+        if (ebWebView.shouldUseReaderFont()) {
             ReaderFontDialogFragment { openCustomFontPicker() }.show(
                 supportFragmentManager,
                 "font_dialog"
@@ -1204,7 +1288,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     }
 
     private fun changeFontSize(size: Int) {
-        if (ninjaWebView.shouldUseReaderFont()) {
+        if (ebWebView.shouldUseReaderFont()) {
             config.readerFontSize = size
         } else {
             config.fontSize = size
@@ -1213,13 +1297,13 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     override fun increaseFontSize() {
         val fontSize =
-            if (ninjaWebView.shouldUseReaderFont()) config.readerFontSize else config.fontSize
+            if (ebWebView.shouldUseReaderFont()) config.readerFontSize else config.fontSize
         changeFontSize(fontSize + 20)
     }
 
     override fun decreaseFontSize() {
         val fontSize =
-            if (ninjaWebView.shouldUseReaderFont()) config.readerFontSize else config.fontSize
+            if (ebWebView.shouldUseReaderFont()) config.readerFontSize else config.fontSize
         if (fontSize > 50) changeFontSize(fontSize - 20)
     }
 
@@ -1231,8 +1315,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 binding.subContainer,
                 binding.twoPanelLayout,
                 { showTranslation() },
-                { if (ninjaWebView.isReaderModeOn) ninjaWebView.toggleReaderMode() },
-                { url -> ninjaWebView.loadUrl(url) },
+                { if (ebWebView.isReaderModeOn) ebWebView.toggleReaderMode() },
+                { url -> ebWebView.loadUrl(url) },
                 { api, webView -> translateByParagraph(api, webView) },
                 this::translateWebView
             )
@@ -1241,71 +1325,67 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     private fun translateByParagraph(
         translateApi: TRANSLATE_API,
-        webView: NinjaWebView = ninjaWebView,
+        webView: EBWebView = ebWebView,
     ) {
-        if (config.enableInplaceParagraphTranslate) {
-            translateByParagraphInPlace(translateApi, webView)
-        } else {
-            translateByParagraphInReaderMode(translateApi)
-        }
+        translateByParagraphInPlace(translateApi, webView)
     }
 
     private fun translateByParagraphInPlace(
         translateApi: TRANSLATE_API,
-        webView: NinjaWebView = ninjaWebView,
+        webView: EBWebView = ebWebView,
     ) {
         lifecycleScope.launch {
             webView.translateApi = translateApi
             webView.translateByParagraphInPlace()
-            if (webView == ninjaWebView) {
+            if (webView == ebWebView) {
                 languageLabelView?.visibility = VISIBLE
             }
         }
     }
 
-    private fun translateByParagraphInReaderMode(translateApi: TRANSLATE_API) {
-        lifecycleScope.launch {
-            val currentUrl = ninjaWebView.url
-
-            // assume it's current one
-            val translateModeWebView = if (ninjaWebView.isTranslatePage) {
-                ninjaWebView
-            } else {
-                // get html from original WebView
-                val htmlCache = ninjaWebView.getRawReaderHtml()
-                // create a new WebView
-                addAlbum("", "")
-                // set it to translate mode
-                ninjaWebView.isTranslatePage = true
-                ninjaWebView.translateApi = translateApi
-                // set its raw html to be the same as original WebView
-                ninjaWebView.rawHtmlCache = htmlCache
-                // show the language label
-                languageLabelView?.visibility = VISIBLE
-                ninjaWebView
-            }
-
-            val translatedHtml = translationViewModel
-                .translateByParagraph(translateModeWebView.rawHtmlCache ?: return@launch)
-            if (translateModeWebView.isAttachedToWindow) {
-                translateModeWebView.loadDataWithBaseURL(
-                    if (!ninjaWebView.isPlainText) currentUrl else null,
-                    translatedHtml,
-                    "text/html",
-                    "utf-8",
-                    null
-                )
-            }
-        }
-    }
+//    private fun translateByParagraphInReaderMode(translateApi: TRANSLATE_API) {
+//        lifecycleScope.launch {
+//            val currentUrl = ebWebView.url
+//
+//            // assume it's current one
+//            val translateModeWebView = if (ebWebView.isTranslatePage) {
+//                ebWebView
+//            } else {
+//                // get html from original WebView
+//                val htmlCache = ebWebView.getRawReaderHtml()
+//                // create a new WebView
+//                addAlbum("", "")
+//                // set it to translate mode
+//                ebWebView.isTranslatePage = true
+//                ebWebView.translateApi = translateApi
+//                // set its raw html to be the same as original WebView
+//                ebWebView.rawHtmlCache = htmlCache
+//                // show the language label
+//                languageLabelView?.visibility = VISIBLE
+//                ebWebView
+//            }
+//
+//            val translatedHtml = translationViewModel
+//                .translateByParagraph(translateModeWebView.rawHtmlCache ?: return@launch)
+//            if (translateModeWebView.isAttachedToWindow) {
+//                translateModeWebView.loadDataWithBaseURL(
+//                    if (!ebWebView.isPlainText) currentUrl else null,
+//                    translatedHtml,
+//                    "text/html",
+//                    "utf-8",
+//                    null
+//                )
+//            }
+//        }
+//    }
 
     private fun isTwoPaneControllerInitialized(): Boolean = ::twoPaneController.isInitialized
 
-    override fun showTranslation(webView: NinjaWebView?) {
+    override fun showTranslation(webView: EBWebView?) {
         maybeInitTwoPaneController()
 
         lifecycleScope.launch(Dispatchers.Main) {
-            twoPaneController.showTranslation(webView ?: ninjaWebView)
+            twoPaneController.showTranslation(webView ?: ebWebView)
         }
     }
 
@@ -1340,9 +1420,9 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                         val stringList =
                             HelperUnit.readContentAsStringList(contentResolver, viewUri)
                         val htmlContent = HelperUnit.srtToHtml(stringList)
-                        ninjaWebView.isPlainText = true
-                        ninjaWebView.rawHtmlCache = htmlContent
-                        ninjaWebView.loadData(htmlContent, "text/html", "utf-8")
+                        ebWebView.isPlainText = true
+                        ebWebView.rawHtmlCache = htmlContent
+                        ebWebView.loadData(htmlContent, "text/html", "utf-8")
 
                     } else if (mimeType.equals("application/octet-stream")) {
                         HelperUnit.getCachedPathFromURI(this, viewUri).let {
@@ -1371,7 +1451,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 initSavedTabs()
                 val searchedKeyword = intent.getStringExtra(SearchManager.QUERY).orEmpty()
                 if (currentAlbumController != null && config.isExternalSearchInSameTab) {
-                    ninjaWebView.loadUrl(searchedKeyword)
+                    ebWebView.loadUrl(searchedKeyword)
                 } else {
                     addAlbum(url = searchedKeyword)
                 }
@@ -1397,7 +1477,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                         sentKeyword
                     )
                 if (currentAlbumController != null && config.isExternalSearchInSameTab) {
-                    ninjaWebView.loadUrl(url)
+                    ebWebView.loadUrl(url)
                 } else {
                     addAlbum(url = url)
                 }
@@ -1422,7 +1502,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                         text
                     )
                 if (currentAlbumController != null && config.isExternalSearchInSameTab) {
-                    ninjaWebView.loadUrl(url)
+                    ebWebView.loadUrl(url)
                 } else {
                     addAlbum(url = url)
                 }
@@ -1446,7 +1526,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 initSavedTabs()
                 val url = externalSearchViewModel.generateSearchUrl(text)
                 if (currentAlbumController != null && config.isExternalSearchInSameTab) {
-                    ninjaWebView.loadUrl(url)
+                    ebWebView.loadUrl(url)
                 } else {
                     addAlbum(url = url)
                 }
@@ -1456,7 +1536,14 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
             ACTION_READ_ALOUD -> readArticle()
 
-            null -> {}
+            null -> {
+                if (browserContainer.isEmpty()) {
+                    initSavedTabs { addAlbum() }
+                } else {
+                    return
+                }
+            }
+
             else -> addAlbum()
         }
         getIntent().action = ""
@@ -1516,16 +1603,16 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         }
     }
 
-    override fun showTouchAreaDialog() = TouchAreaDialogFragment(ninjaWebView.url.orEmpty())
+    override fun showTouchAreaDialog() = TouchAreaDialogFragment(ebWebView.url.orEmpty())
         .show(supportFragmentManager, "TouchAreaDialog")
 
     override fun showTranslationConfigDialog(translateDirectly: Boolean) {
         maybeInitTwoPaneController()
-        TranslationConfigDlgFragment(ninjaWebView.url.orEmpty()) { shouldTranslate ->
+        TranslationConfigDlgFragment(ebWebView.url.orEmpty()) { shouldTranslate ->
             if (shouldTranslate) {
                 translate(config.translationMode)
             } else {
-                ninjaWebView.reload()
+                ebWebView.reload()
             }
         }
             .show(supportFragmentManager, "TranslationConfigDialog")
@@ -1562,7 +1649,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
                 ConfigManager.K_TOOLBAR_ICONS_FOR_LARGE,
                 ConfigManager.K_TOOLBAR_ICONS,
-                -> {
+                    -> {
                     composeToolbarViewController.updateIcons()
                 }
 
@@ -1572,66 +1659,66 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
                 ConfigManager.K_FONT_TYPE -> {
                     if (config.fontType == FontType.SYSTEM_DEFAULT) {
-                        ninjaWebView.reload()
+                        ebWebView.reload()
                     } else {
-                        ninjaWebView.updateCssStyle()
+                        ebWebView.updateCssStyle()
                     }
                 }
 
                 ConfigManager.K_READER_FONT_TYPE -> {
                     if (config.readerFontType == FontType.SYSTEM_DEFAULT) {
-                        ninjaWebView.reload()
+                        ebWebView.reload()
                     } else {
-                        ninjaWebView.updateCssStyle()
+                        ebWebView.updateCssStyle()
                     }
                 }
 
                 ConfigManager.K_FONT_SIZE -> {
-                    ninjaWebView.settings.textZoom = config.fontSize
+                    ebWebView.settings.textZoom = config.fontSize
                 }
 
                 ConfigManager.K_READER_FONT_SIZE -> {
-                    if (ninjaWebView.shouldUseReaderFont()) {
-                        ninjaWebView.settings.textZoom = config.readerFontSize
+                    if (ebWebView.shouldUseReaderFont()) {
+                        ebWebView.settings.textZoom = config.readerFontSize
                     }
                 }
 
                 ConfigManager.K_BOLD_FONT -> {
                     composeToolbarViewController.updateIcons()
                     if (config.boldFontStyle) {
-                        ninjaWebView.updateCssStyle()
+                        ebWebView.updateCssStyle()
                     } else {
-                        ninjaWebView.reload()
+                        ebWebView.reload()
                     }
                 }
 
                 ConfigManager.K_BLACK_FONT -> {
                     composeToolbarViewController.updateIcons()
                     if (config.blackFontStyle) {
-                        ninjaWebView.updateCssStyle()
+                        ebWebView.updateCssStyle()
                     } else {
-                        ninjaWebView.reload()
+                        ebWebView.reload()
                     }
                 }
 
-                ConfigManager.K_ENABLE_IMAGE_ADJUSTMENT -> ninjaWebView.reload()
+                ConfigManager.K_ENABLE_IMAGE_ADJUSTMENT -> ebWebView.reload()
 
                 ConfigManager.K_CUSTOM_FONT -> {
                     if (config.fontType == FontType.CUSTOM) {
-                        ninjaWebView.updateCssStyle()
+                        ebWebView.updateCssStyle()
                     }
                 }
 
                 ConfigManager.K_READER_CUSTOM_FONT -> {
-                    if (config.readerFontType == FontType.CUSTOM && ninjaWebView.shouldUseReaderFont()) {
-                        ninjaWebView.updateCssStyle()
+                    if (config.readerFontType == FontType.CUSTOM && ebWebView.shouldUseReaderFont()) {
+                        ebWebView.updateCssStyle()
                     }
                 }
 
                 ConfigManager.K_IS_INCOGNITO_MODE -> {
-                    ninjaWebView.incognito = config.isIncognitoMode
+                    ebWebView.incognito = config.isIncognitoMode
                     composeToolbarViewController.updateIcons()
-                    NinjaToast.showShort(
+                    EBToast.showShort(
                         this,
                         "Incognito mode is " + if (config.isIncognitoMode) "enabled." else "disabled."
                     )
@@ -1646,8 +1733,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 }
 
                 ConfigManager.K_DESKTOP -> {
-                    ninjaWebView.updateUserAgentString()
-                    ninjaWebView.reload()
+                    ebWebView.updateUserAgentString()
+                    ebWebView.reload()
                     composeToolbarViewController.updateIcons()
                 }
 
@@ -1660,9 +1747,9 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
                 ConfigManager.K_CUSTOM_USER_AGENT,
                 ConfigManager.K_ENABLE_CUSTOM_USER_AGENT,
-                -> {
-                    ninjaWebView.updateUserAgentString()
-                    ninjaWebView.reload()
+                    -> {
+                    ebWebView.updateUserAgentString()
+                    ebWebView.reload()
                 }
 
                 ConfigManager.K_ENABLE_TOUCH -> {
@@ -1692,10 +1779,10 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private val gestureHandler: GestureHandler by lazy { GestureHandler(this) }
 
     override fun goForward() {
-        if (ninjaWebView.canGoForward()) {
-            ninjaWebView.goForward()
+        if (ebWebView.canGoForward()) {
+            ebWebView.goForward()
         } else {
-            NinjaToast.show(this, R.string.toast_webview_forward)
+            EBToast.show(this, R.string.toast_webview_forward)
         }
     }
 
@@ -1769,7 +1856,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     private fun initSearchPanel() {
         with(binding.mainSearchPanel) {
-            onTextChanged = { (currentAlbumController as NinjaWebView?)?.findAllAsync(it) }
+            onTextChanged = { (currentAlbumController as EBWebView?)?.findAllAsync(it) }
             onCloseClick = { hideSearchPanel() }
             onUpClick = { searchUp(it) }
             onDownClick = { searchDown(it) }
@@ -1778,40 +1865,40 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     private fun searchUp(text: String) {
         if (text.isEmpty()) {
-            NinjaToast.show(this, getString(R.string.toast_input_empty))
+            EBToast.show(this, getString(R.string.toast_input_empty))
             return
         }
         ViewUnit.hideKeyboard(this)
-        (currentAlbumController as NinjaWebView).findNext(false)
+        (currentAlbumController as EBWebView).findNext(false)
     }
 
     private fun searchDown(text: String) {
         if (text.isEmpty()) {
-            NinjaToast.show(this, getString(R.string.toast_input_empty))
+            EBToast.show(this, getString(R.string.toast_input_empty))
             return
         }
         ViewUnit.hideKeyboard(this)
-        (currentAlbumController as NinjaWebView).findNext(true)
+        (currentAlbumController as EBWebView).findNext(true)
     }
 
     override fun showFastToggleDialog() {
-        if (!this::ninjaWebView.isInitialized) return
+        if (!this::ebWebView.isInitialized) return
 
         FastToggleDialogFragment {
-            ninjaWebView.initPreferences()
-            ninjaWebView.reload()
+            ebWebView.initPreferences()
+            ebWebView.reload()
         }.show(supportFragmentManager, "fast_toggle_dialog")
     }
 
     override fun addNewTab(url: String) = addAlbum(url = url)
 
-    private fun getUrlMatchedBrowser(url: String): NinjaWebView? {
-        return browserContainer.list().firstOrNull { it.albumUrl == url } as NinjaWebView?
+    private fun getUrlMatchedBrowser(url: String): EBWebView? {
+        return browserContainer.list().firstOrNull { it.albumUrl == url } as EBWebView?
     }
 
-    private var preloadedWebView: NinjaWebView? = null
+    private var preloadedWebView: EBWebView? = null
 
-    open fun createNinjaWebView(): NinjaWebView = NinjaWebView(this, this).apply {
+    open fun createebWebView(): EBWebView = EBWebView(this, this).apply {
         overScrollMode = View.OVER_SCROLL_NEVER
     }
 
@@ -1823,7 +1910,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         incognito: Boolean = false,
         enablePreloadWebView: Boolean = true,
     ) {
-        val newWebView = (preloadedWebView ?: createNinjaWebView()).apply {
+        val newWebView = (preloadedWebView ?: createebWebView()).apply {
             this.albumTitle = title
             this.incognito = incognito
             setOnTouchListener(createMultiTouchTouchListener(this))
@@ -1838,23 +1925,27 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         loadUrlInWebView(foreground, newWebView, url)
 
         updateSavedAlbumInfo()
+
+        if (config.adBlock) {
+            adFilter.setupWebView(newWebView)
+        }
     }
 
     private fun maybeCreateNewPreloadWebView(
         enablePreloadWebView: Boolean,
-        newWebView: NinjaWebView,
+        newWebView: EBWebView,
     ) {
         preloadedWebView = null
         if (enablePreloadWebView) {
             newWebView.postDelayed({
                 if (preloadedWebView == null) {
-                    preloadedWebView = createNinjaWebView()
+                    preloadedWebView = createebWebView()
                 }
             }, 2000)
         }
     }
 
-    private fun updateTabPreview(newWebView: NinjaWebView, url: String) {
+    private fun updateTabPreview(newWebView: EBWebView, url: String) {
         bookmarkManager.findFaviconBy(url)?.getBitmap()?.let {
             newWebView.setAlbumCover(it)
         }
@@ -1870,7 +1961,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         }
     }
 
-    private fun loadUrlInWebView(foreground: Boolean, webView: NinjaWebView, url: String) {
+    private fun loadUrlInWebView(foreground: Boolean, webView: EBWebView, url: String) {
         if (!foreground) {
             webView.deactivate()
             if (config.enableWebBkgndLoad) {
@@ -1888,8 +1979,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         }
     }
 
-    private fun createMultiTouchTouchListener(ninjaWebView: NinjaWebView): MultitouchListener =
-        object : MultitouchListener(this@BrowserActivity, ninjaWebView) {
+    private fun createMultiTouchTouchListener(ebWebView: EBWebView): MultitouchListener =
+        object : MultitouchListener(this@BrowserActivity, ebWebView) {
             private var longPressStartPoint: Point? = null
             override fun onSwipeTop() = gestureHandler.handle(config.multitouchUp)
             override fun onSwipeBottom() = gestureHandler.handle(config.multitouchDown)
@@ -1948,7 +2039,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     override fun updateAlbum(url: String?) {
         if (url == null) return
-        (currentAlbumController as NinjaWebView).loadUrl(url)
+        (currentAlbumController as EBWebView).loadUrl(url)
         updateTitle()
 
         updateSavedAlbumInfo()
@@ -1983,7 +2074,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 if (!showHome) {
                     finish()
                 } else {
-                    ninjaWebView.loadUrl(config.favoriteUrl)
+                    ebWebView.loadUrl(config.favoriteUrl)
                 }
             } else {
                 // only refresh album when the delete one is current one
@@ -1999,17 +2090,17 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         else max(0, removeIndex - 1)
 
     private fun updateTitle() {
-        if (!this::ninjaWebView.isInitialized) return
+        if (!this::ebWebView.isInitialized) return
 
-        if (this::ninjaWebView.isInitialized && ninjaWebView === currentAlbumController) {
-            composeToolbarViewController.updateTitle(ninjaWebView.title.orEmpty())
+        if (this::ebWebView.isInitialized && ebWebView === currentAlbumController) {
+            composeToolbarViewController.updateTitle(ebWebView.title.orEmpty())
         }
     }
 
     private fun scrollChange() {
-        ninjaWebView.setScrollChangeListener(object : NinjaWebView.OnScrollChangeListener {
+        ebWebView.setScrollChangeListener(object : EBWebView.OnScrollChangeListener {
             override fun onScrollChange(scrollY: Int, oldScrollY: Int) {
-                ninjaWebView.updatePageInfo()
+                ebWebView.updatePageInfo()
 
                 if (::twoPaneController.isInitialized) {
                     twoPaneController.scrollChange(scrollY - oldScrollY)
@@ -2018,8 +2109,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 if (!config.shouldHideToolbar) return
 
                 val height =
-                    floor(x = ninjaWebView.contentHeight * ninjaWebView.resources.displayMetrics.density.toDouble()).toInt()
-                val webViewHeight = ninjaWebView.height
+                    floor(x = ebWebView.contentHeight * ebWebView.resources.displayMetrics.density.toDouble()).toInt()
+                val webViewHeight = ebWebView.height
                 val cutoff =
                     height - webViewHeight - 112 * resources.displayMetrics.density.roundToInt()
                 if (scrollY in (oldScrollY + 1)..cutoff) {
@@ -2059,8 +2150,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     override fun focusOnInput() {
         composeToolbarViewController.hide()
 
-        val textOrUrl = if (ninjaWebView.url?.startsWith("data:") != true) {
-            val url = ninjaWebView.url.orEmpty()
+        val textOrUrl = if (ebWebView.url?.startsWith("data:") != true) {
+            val url = ebWebView.url.orEmpty()
             TextFieldValue(url, selection = TextRange(0, url.length))
         } else {
             TextFieldValue("")
@@ -2130,7 +2221,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             )
 
         }
-        ViewUnit.invertColor(view, config.hasInvertedColor(ninjaWebView.url.orEmpty()))
+        ViewUnit.invertColor(view, config.hasInvertedColor(ebWebView.url.orEmpty()))
 
         val decorView = window.decorView as FrameLayout
         decorView.addView(
@@ -2196,18 +2287,18 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private var previousKeyEvent: KeyEvent? = null
     override fun handleKeyEvent(event: KeyEvent): Boolean {
         if (event.action != ACTION_DOWN) return false
-        if (ninjaWebView.hitTestResult.type == HitTestResult.EDIT_TEXT_TYPE) return false
+        if (ebWebView.hitTestResult.type == HitTestResult.EDIT_TEXT_TYPE) return false
 
         // process dpad navigation
         if (config.useUpDownPageTurn) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    ninjaWebView.pageDownWithNoAnimation()
+                    ebWebView.pageDownWithNoAnimation()
                     return true
                 }
 
                 KeyEvent.KEYCODE_DPAD_UP -> {
-                    ninjaWebView.pageUpWithNoAnimation()
+                    ebWebView.pageUpWithNoAnimation()
                     return true
                 }
             }
@@ -2227,7 +2318,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                     showAlbum(controller)
                 }
 
-                KeyEvent.KEYCODE_G -> ninjaWebView.jumpToBottom()
+                KeyEvent.KEYCODE_G -> ebWebView.jumpToBottom()
                 else -> return false
             }
         } else { // non-capital
@@ -2242,10 +2333,10 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                     }
                 }
 
-                KeyEvent.KEYCODE_J -> ninjaWebView.pageDownWithNoAnimation()
-                KeyEvent.KEYCODE_K -> ninjaWebView.pageUpWithNoAnimation()
-                KeyEvent.KEYCODE_H -> ninjaWebView.goBack()
-                KeyEvent.KEYCODE_L -> ninjaWebView.goForward()
+                KeyEvent.KEYCODE_J -> ebWebView.pageDownWithNoAnimation()
+                KeyEvent.KEYCODE_K -> ebWebView.pageUpWithNoAnimation()
+                KeyEvent.KEYCODE_H -> ebWebView.goBack()
+                KeyEvent.KEYCODE_L -> ebWebView.goForward()
                 KeyEvent.KEYCODE_R -> showTranslation()
                 KeyEvent.KEYCODE_D -> removeAlbum()
                 KeyEvent.KEYCODE_T -> {
@@ -2312,7 +2403,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
                 if (domain.isNotBlank()) {
                     config.adSites = config.adSites.apply { add(domain) }
-                    ninjaWebView.reload()
+                    ebWebView.reload()
                 }
             }
         }
@@ -2323,7 +2414,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             title = "remove this url from blacklist?",
             okAction = {
                 config.adSites = config.adSites.apply { remove(url) }
-                ninjaWebView.reload()
+                ebWebView.reload()
             }
         )
     }
@@ -2331,15 +2422,15 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private var motionEvent: MotionEvent? = null
     private var longPressPoint: Point = Point(0, 0)
     override fun onLongPress(message: Message, event: MotionEvent?) {
-        if (ninjaWebView.isSelectingText) return
+        if (ebWebView.isSelectingText) return
 
         motionEvent = event
         longPressPoint = Point(event?.x?.toInt() ?: 0, event?.y?.toInt() ?: 0)
-        val url = BrowserUnit.getWebViewLinkUrl(ninjaWebView, message)
+        val url = BrowserUnit.getWebViewLinkUrl(ebWebView, message)
         if (url.isNotBlank()) {
             // case: image or link
-            val linkImageUrl = BrowserUnit.getWebViewLinkImageUrl(ninjaWebView, message)
-            BrowserUnit.getWebViewLinkTitle(ninjaWebView) { linkTitle ->
+            val linkImageUrl = BrowserUnit.getWebViewLinkImageUrl(ebWebView, message)
+            BrowserUnit.getWebViewLinkTitle(ebWebView) { linkTitle ->
                 val titleText = linkTitle.ifBlank { url }.toString()
                 ContextMenuDialogFragment(
                     url,
@@ -2363,7 +2454,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             ContextMenuItemType.NewTabForeground -> addAlbum(title, url)
             ContextMenuItemType.NewTabBackground -> addAlbum(title, url, false)
             ContextMenuItemType.ShareLink -> {
-                if (prepareRecord()) NinjaToast.show(this, getString(R.string.toast_share_failed))
+                if (prepareRecord()) EBToast.show(this, getString(R.string.toast_share_failed))
                 else IntentUnit.share(this, title, url)
             }
 
@@ -2372,8 +2463,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 BrowserUnit.stripUrlQuery(url)
             )
 
-            ContextMenuItemType.SelectText -> ninjaWebView.post {
-                ninjaWebView.selectLinkText(longPressPoint)
+            ContextMenuItemType.SelectText -> ebWebView.post {
+                ebWebView.selectLinkText(longPressPoint)
             }
 
             ContextMenuItemType.OpenWith -> HelperUnit.showBrowserChooser(
@@ -2402,8 +2493,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         }
     }
 
-    private val headlessWebView: NinjaWebView by lazy {
-        NinjaWebView(this, this).apply {
+    private val headlessWebView: EBWebView by lazy {
+        EBWebView(this, this).apply {
             setOnPageFinishedAction {
                 lifecycleScope.launch {
                     val content = headlessWebView.getRawText()
@@ -2431,13 +2522,13 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         if (toBeReadProcessUrlList.size == 1) {
             headlessWebView.loadUrl(url)
         }
-        NinjaToast.show(this, R.string.added_to_read_list)
+        EBToast.show(this, R.string.added_to_read_list)
     }
 
     private fun translateWebView() {
         lifecycleScope.launch {
             val base64String = translationViewModel.translateWebView(
-                ninjaWebView,
+                ebWebView,
                 config.sourceLanguage,
                 config.translationLanguage,
             )
@@ -2450,11 +2541,11 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                     twoPaneController.showSecondPaneWithData(translatedImageHtml)
                 } else {
                     addAlbum()
-                    ninjaWebView.isTranslatePage = true
-                    ninjaWebView.loadData(translatedImageHtml, "text/html", "utf-8")
+                    ebWebView.isTranslatePage = true
+                    ebWebView.loadData(translatedImageHtml, "text/html", "utf-8")
                 }
             } else {
-                NinjaToast.show(this@BrowserActivity, "Failed to translate image")
+                EBToast.show(this@BrowserActivity, "Failed to translate image")
             }
         }
     }
@@ -2462,7 +2553,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private fun translateImage(url: String) {
         lifecycleScope.launch {
             val base64String = translationViewModel.translateImage(
-                ninjaWebView.url.orEmpty(),
+                ebWebView.url.orEmpty(),
                 url,
                 TranslationLanguage.KO,
                 config.translationLanguage,
@@ -2477,11 +2568,11 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                     twoPaneController.showSecondPaneWithData(translatedImageHtml)
                 } else {
                     addAlbum()
-                    ninjaWebView.isTranslatePage = true
-                    ninjaWebView.loadData(translatedImageHtml, "text/html", "utf-8")
+                    ebWebView.isTranslatePage = true
+                    ebWebView.loadData(translatedImageHtml, "text/html", "utf-8")
                 }
             } else {
-                NinjaToast.show(this@BrowserActivity, "Failed to translate image")
+                EBToast.show(this@BrowserActivity, "Failed to translate image")
             }
         }
     }
@@ -2492,7 +2583,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 BrowserUnit.saveImageFromUrl(url, saveImageFilePickerLauncher)
             } else {
-                NinjaToast.show(this, "Not supported dataUrl")
+                EBToast.show(this, "Not supported dataUrl")
             }
             return
         }
@@ -2544,8 +2635,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     }
 
     private fun hideSearchPanel() {
-        if (this::ninjaWebView.isInitialized) {
-            ninjaWebView.clearMatches()
+        if (this::ebWebView.isInitialized) {
+            ebWebView.clearMatches()
         }
         searchOnSite = false
         ViewUnit.hideKeyboard(this)
@@ -2587,15 +2678,15 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     override fun showSaveEpubDialog() = dialogManager.showSaveEpubDialog { uri ->
         if (uri == null) {
-            epubManager.showWriteEpubFilePicker(writeEpubFilePickerLauncher)
+            epubManager.showWriteEpubFilePicker(writeEpubFilePickerLauncher, ebWebView.title ?: "einkbro")
         } else {
             saveEpub(uri)
         }
     }
 
-    private fun readArticle() {
+    protected fun readArticle() {
         lifecycleScope.launch {
-            ttsViewModel.readArticle(ninjaWebView.getRawText())
+            ttsViewModel.readArticle(ebWebView.getRawText())
         }
     }
 
@@ -2603,14 +2694,14 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     override fun showMenuDialog() =
         MenuDialogFragment(
-            ninjaWebView.url.orEmpty(),
+            ebWebView.url.orEmpty(),
             ttsViewModel.isReading(),
-            { menuActionHandler.handle(it, ninjaWebView) },
+            { menuActionHandler.handle(it, ebWebView) },
             { menuActionHandler.handleLongClick(it) }
         ).show(supportFragmentManager, "menu_dialog")
 
     override fun showWebArchiveFilePicker() {
-        val fileName = "${ninjaWebView.title}.mht"
+        val fileName = "${ebWebView.title}.mht"
         BrowserUnit.createFilePicker(createWebArchivePickerLauncher, fileName)
     }
 
@@ -2641,7 +2732,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             return
         }
 
-        twoPaneController.showSecondPaneWithUrl(url ?: ninjaWebView.url.orEmpty())
+        twoPaneController.showSecondPaneWithUrl(url ?: ebWebView.url.orEmpty())
     }
 
     private fun nextAlbumController(next: Boolean): AlbumController? {
@@ -2665,6 +2756,15 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         return list[index]
     }
 
+    private fun getFocusedWebView(): EBWebView = when {
+        ebWebView.hasFocus() -> ebWebView
+        isTwoPaneControllerInitialized() && twoPaneController.getSecondWebView().hasFocus() -> {
+            twoPaneController.getSecondWebView()
+        }
+
+        else -> ebWebView
+    }
+
     // - action mode handling
     override fun onActionModeStarted(mode: ActionMode) {
         val isTextEditMode = ViewUnit.isTextEditMode(this, mode.menu)
@@ -2676,7 +2776,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             mode.finish()
 
             lifecycleScope.launch {
-                val keyword = ninjaWebView.getSelectedText()
+                val keyword = getFocusedWebView().getSelectedText()
                 remoteConnViewModel.sendTextSearch(externalSearchViewModel.generateSearchUrl(keyword))
             }
             return
@@ -2687,7 +2787,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             mode.menu.clear()
 
             lifecycleScope.launch {
-                toggleSplitScreen(splitSearchViewModel.getUrl(ninjaWebView.getSelectedText()))
+                toggleSplitScreen(splitSearchViewModel.getUrl(ebWebView.getSelectedText()))
             }
 
             mode.finish()
@@ -2703,9 +2803,9 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 mode.finish()
 
                 lifecycleScope.launch {
-                    actionModeMenuViewModel.updateSelectedText(ninjaWebView.getSelectedText())
+                    actionModeMenuViewModel.updateSelectedText(HelperUnit.unescapeJava(getFocusedWebView().getSelectedText()))
                     showActionModeView(translationViewModel) {
-                        ninjaWebView.removeTextSelection()
+                        getFocusedWebView().removeTextSelection()
                     }
                 }
             }
@@ -2746,8 +2846,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         super.onPause()
         actionModeMenuViewModel.finish()
         if (!config.continueMedia && !isMeetPipCriteria()) {
-            if (this::ninjaWebView.isInitialized) {
-                ninjaWebView.pauseTimers()
+            if (this::ebWebView.isInitialized) {
+                ebWebView.pauseTimers()
             }
         }
     }

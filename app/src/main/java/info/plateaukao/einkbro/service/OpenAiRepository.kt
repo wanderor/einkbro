@@ -1,6 +1,7 @@
 package info.plateaukao.einkbro.service
 
 import android.util.Log
+import info.plateaukao.einkbro.preference.ChatGPTActionInfo
 import info.plateaukao.einkbro.preference.ConfigManager
 import info.plateaukao.einkbro.preference.GptActionType
 import info.plateaukao.einkbro.service.data.Content
@@ -54,15 +55,15 @@ class OpenAiRepository : KoinComponent {
 
     fun chatStream(
         messages: List<ChatMessage>,
-        gptActionType: GptActionType,
+        gptActionInfo: ChatGPTActionInfo,
         appendResponseAction: (String) -> Unit,
         doneAction: () -> Unit = {},
         failureAction: () -> Unit,
     ) {
-        if (gptActionType == GptActionType.Gemini) {
-            geminiStream(messages, appendResponseAction, doneAction, failureAction)
+        if (gptActionInfo.actionType == GptActionType.Gemini) {
+            geminiStream(messages, appendResponseAction, gptActionInfo, doneAction, failureAction)
         } else {
-            openAiStream(messages, appendResponseAction, doneAction, failureAction)
+            openAiStream(messages, appendResponseAction, doneAction, gptActionInfo, failureAction)
         }
     }
 
@@ -70,9 +71,10 @@ class OpenAiRepository : KoinComponent {
         messages: List<ChatMessage>,
         appendResponseAction: (String) -> Unit,
         doneAction: () -> Unit = {},
+        gptActionInfo: ChatGPTActionInfo,
         failureAction: () -> Unit,
     ) {
-        val request = createCompletionRequest(messages, true)
+        val request = createCompletionRequest(messages, gptActionInfo, true)
 
         eventSource?.cancel()
         eventSource = factory.newEventSource(request, object : okhttp3.sse.EventSourceListener() {
@@ -91,6 +93,7 @@ class OpenAiRepository : KoinComponent {
                         json.decodeFromString(ChatCompletionDelta.serializer(), data)
                     appendResponseAction(chatCompletion.choices.first().delta.content.orEmpty())
                 } catch (e: Exception) {
+                    Log.e("OpenAiRepository", "Error parsing chat completion: $data", e)
                     failureAction()
                     eventSource.cancel()
                     this@OpenAiRepository.eventSource = null
@@ -107,24 +110,25 @@ class OpenAiRepository : KoinComponent {
     private fun geminiStream(
         messages: List<ChatMessage>,
         appendResponseAction: (String) -> Unit,
+        gptActionInfo: ChatGPTActionInfo,
         doneAction: () -> Unit = {},
         failureAction: () -> Unit,
     ) {
-        val request = createGeminiRequest(messages, true)
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                failureAction()
-                return
-            }
-            val inputStream = response.body?.byteStream() ?: return
-            inputStream.source().buffer().use { source ->
-                while (!source.exhausted()) {
-                    val chunk = source.readUtf8Line()
-                    if (chunk == null) {
-                        failureAction()
-                        return
-                    }
-                    try {
+        val request = createGeminiRequest(messages, gptActionInfo, true)
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    failureAction()
+                    return
+                }
+                val inputStream = response.body?.byteStream() ?: return
+                inputStream.source().buffer().use { source ->
+                    while (!source.exhausted()) {
+                        val chunk = source.readUtf8Line()
+                        if (chunk == null) {
+                            failureAction()
+                            return
+                        }
                         Log.d("OpenAiRepository", "chunk: $chunk")
                         val textField = "\"text\": \""
                         if (chunk.contains(textField)) {
@@ -133,12 +137,13 @@ class OpenAiRepository : KoinComponent {
                             Log.d("OpenAiRepository", "text: $text")
                             appendResponseAction(text)
                         }
-                    } catch (e: Exception) {
-                        failureAction()
-                        return
                     }
                 }
             }
+        } catch (e: Exception) {
+            Log.e("OpenAiRepository", "Error fetching Gemini stream", e)
+            failureAction()
+            return
         }
     }
 
@@ -149,43 +154,46 @@ class OpenAiRepository : KoinComponent {
             voiceOption = config.gptVoiceOption,
         )
 
-        client.newCall(request).execute().use { response ->
-            if (response.code != 200 || response.body == null) {
-                return@use continuation.resume(null)
-            }
-            try {
+        try {
+            client.newCall(request).execute().use { response ->
+                if (response.code != 200 || response.body == null) {
+                    return@use continuation.resume(null)
+                }
                 continuation.resume(response.body?.bytes())
-            } catch (e: Exception) {
-                continuation.resume(null)
             }
+        } catch (e: Exception) {
+            Log.e("OpenAiRepository", "Error fetching TTS", e)
+            continuation.resume(null)
         }
     }
 
     suspend fun chatCompletion(
         messages: List<ChatMessage>,
+        gptActionInfo: ChatGPTActionInfo,
     ): ChatCompletion? = suspendCoroutine { continuation ->
-        val request = createCompletionRequest(messages)
-        client.newCall(request).execute().use { response ->
-            if (response.code != 200 || response.body == null) {
-                return@use continuation.resume(null)
-            }
+        val request = createCompletionRequest(messages, gptActionInfo)
+        try {
+            client.newCall(request).execute().use { response ->
+                if (response.code != 200 || response.body == null) {
+                    return@use continuation.resume(null)
+                }
 
-            val responseString = response.body?.string().orEmpty()
-            try {
+                val responseString = response.body?.string().orEmpty()
                 val chatCompletion =
                     json.decodeFromString(ChatCompletion.serializer(), responseString)
                 Log.d("OpenAiRepository", "chatCompletion: $chatCompletion")
                 continuation.resume(chatCompletion)
-            } catch (e: Exception) {
-                continuation.resume(null)
             }
+        } catch (e: Exception) {
+            Log.e("OpenAiRepository", "Error fetching chat completion", e)
+            continuation.resume(null)
         }
     }
 
-    suspend fun queryGemini(messages: List<ChatMessage>, apiKey: String): String {
+    suspend fun queryGemini(messages: List<ChatMessage>, gptActionInfo: ChatGPTActionInfo): String {
         return withContext(Dispatchers.IO) {
             try {
-                val request = createGeminiRequest(messages, false)
+                val request = createGeminiRequest(messages, gptActionInfo, false)
                 val response: Response = client.newCall(request).execute()
                 if (!response.isSuccessful) {
                     return@withContext "Error querying Gemini API: ${response.code}"
@@ -197,14 +205,19 @@ class OpenAiRepository : KoinComponent {
                 responseData.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text
                     ?: "No content available"
             } catch (exception: Exception) {
+                Log.e("OpenAiRepository", "Error querying Gemini API", exception)
                 "something wrong"
             }
         }
     }
 
-    private fun createGeminiRequest(messages: List<ChatMessage>, isStream: Boolean): Request {
+    private fun createGeminiRequest(
+        messages: List<ChatMessage>,
+        gptActionInfo: ChatGPTActionInfo,
+        isStream: Boolean,
+    ): Request {
         val apiPrefix = "https://generativelanguage.googleapis.com/v1beta/models/"
-        val model = config.geminiModel
+        val model = gptActionInfo.model
         val apiUrl = if (isStream)
             "$apiPrefix$model:streamGenerateContent?key=${config.geminiApiKey}"
         else
@@ -251,29 +264,22 @@ class OpenAiRepository : KoinComponent {
 
     private fun createCompletionRequest(
         messages: List<ChatMessage>,
+        gptActionInfo: ChatGPTActionInfo,
         stream: Boolean = false,
     ): Request = Request.Builder()
-        .url("${getCurrentServerUrl()}$completionPath")
+        .url("${getServerUrl(gptActionInfo.actionType)}$completionPath")
         .post(
-            json.encodeToString(ChatRequest(getCurrentModel(), messages, stream))
+            json.encodeToString(ChatRequest(gptActionInfo.model, messages, stream))
                 .toRequestBody(mediaType)
         )
         .header("Authorization", "Bearer $apiKey")
         .build()
 
-    private fun getCurrentServerUrl(): String {
-        return if (config.useCustomGptUrl && config.gptUrl.isNotBlank()) {
+    private fun getServerUrl(gptActionType: GptActionType): String {
+        return if (gptActionType == GptActionType.SelfHosted) {
             config.gptUrl
         } else {
             "https://api.openai.com"
-        }
-    }
-
-    private fun getCurrentModel(): String {
-        return if (!config.useCustomGptUrl) {
-            config.gptModel
-        } else {
-            config.alternativeModel
         }
     }
 
@@ -283,7 +289,7 @@ class OpenAiRepository : KoinComponent {
         speed: Double = 1.0,
         voiceOption: GptVoiceOption = GptVoiceOption.Alloy,
     ): Request = Request.Builder()
-        .url("${getCurrentServerUrl()}$ttsPath")
+        .url("${getServerUrl(GptActionType.OpenAi)}$ttsPath")
         .post(
             json.encodeToString(
                 TTSRequest(
