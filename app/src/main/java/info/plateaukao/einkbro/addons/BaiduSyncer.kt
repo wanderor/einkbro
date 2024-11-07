@@ -477,10 +477,10 @@ class BaiduSyncer(
         }
 
         val now = Date().time
-        var shortcut = offline
+        var shortcut = false
         var backfilling = true
-        var caching = !offline
-        if (now >= lastSyncTime + config.interval * 1000L) {  // full path
+        var caching = true
+        if (now >= lastSyncTime + config.interval * 1000L && !offline) {  // full path
             lastSyncTime = now  // update even if action fails
             // Note: prevent infinite memory growth.
             if (recentlyCachedUrls.size > MAX_RECENTLY_WORKED_URLS) recentlyCachedUrls.clear()
