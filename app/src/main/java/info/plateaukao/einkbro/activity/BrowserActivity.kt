@@ -1915,6 +1915,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             this.incognito = incognito
             setOnTouchListener(createMultiTouchTouchListener(this))
             setOnPageFinishedAction { baiduSyncer.onPageFinished(this) }
+            setHandleUriAction {url -> baiduSyncer.handleUri(url)}
         }
 
         maybeCreateNewPreloadWebView(enablePreloadWebView, newWebView)

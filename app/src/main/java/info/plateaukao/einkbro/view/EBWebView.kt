@@ -16,6 +16,7 @@ import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.ValueCallback
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.webkit.WebSettingsCompat
@@ -111,6 +112,8 @@ open class EBWebView(
     }
 
     fun setOnPageFinishedAction(action: () -> Unit) = webViewClient.setOnPageFinishedAction(action)
+
+    fun setHandleUriAction(action: (String) -> Boolean) = webViewClient.setHandleUriAction(action)
 
     fun updateCssStyle() {
         val fontType = if (shouldUseReaderFont()) config.readerFontType else config.fontType

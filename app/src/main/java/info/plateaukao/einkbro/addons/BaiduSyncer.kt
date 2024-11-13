@@ -8,6 +8,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.View
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
@@ -17,7 +19,7 @@ import com.google.android.material.snackbar.Snackbar
 import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.browser.BrowserContainer
 import info.plateaukao.einkbro.browser.BrowserController
-import info.plateaukao.einkbro.view.NinjaWebView
+import info.plateaukao.einkbro.view.EBWebView
 import kotlin.math.max
 import kotlin.math.min
 import kotlinx.serialization.Serializable
@@ -114,6 +116,8 @@ private data class BaiduSyncerConfig(
     val display: Int = 15,
     // Regular expression pattern for URLs to preload in reader mode.
     val reader: String = "",
+    // Regular expression pattern for URLs to skip loading.
+    val skipper: String = "",
     // For debugging release version.
     // Whether to turn on logging to external file.
     val logging: Boolean = false
@@ -214,7 +218,7 @@ class BaiduSyncer(
         }
 
         // Checks whether a WebView instance is indeed loaded.
-        private fun isLoaded(webView: NinjaWebView): Boolean {
+        private fun isLoaded(webView: EBWebView): Boolean {
             // TODO: add i18n support
             return webView.album.isLoaded && webView.albumTitle.isNotBlank() &&
                    webView.albumTitle != "..." &&
@@ -273,7 +277,7 @@ class BaiduSyncer(
     private val sharedPreferences: SharedPreferences =
         _context.getSharedPreferences("baidu", Context.MODE_PRIVATE)
     // For loading URLs in background, e.g. for caching.
-    private val headlessWebView: NinjaWebView = NinjaWebView(context, browserController)
+    private val headlessWebView: EBWebView = EBWebView(context, browserController)
 
     // Configuration.
     private var config: BaiduSyncerConfig = BaiduSyncerConfig()
@@ -296,6 +300,8 @@ class BaiduSyncer(
     private var recentUrls: MutableMap<String, Long> = mutableMapOf()
     // Regular expression pattern of URLs to preload in reader mode
     private var readerUrlRegex: Regex = Regex("")
+    // Regular expression pattern of URLs to skip loading
+    private var skipperUrlRegex: Regex = Regex("")
     // Regular expression pattern of URLs/paths for local cache.
     // Note: must be synced with cacheUrl().
     private val cacheRegex = Regex(""".*/cache-\d+\.mht""")
@@ -333,7 +339,7 @@ class BaiduSyncer(
         var urlsToClose: Set<String> = setOf()
     )
 
-    public fun onPageFinished(webView: NinjaWebView) {
+    public fun onPageFinished(webView: EBWebView) {
         handler.postDelayed({
             if (webView.albumUrl.startsWith("http")) {
                 if (isLoaded(webView)) {
@@ -348,6 +354,14 @@ class BaiduSyncer(
                 }
             }
         }, 2000)
+    }
+
+    public fun handleUri(url: String): Boolean {
+        if (skipperUrlRegex.matches(url)) {
+            log(Log.DEBUG, "Skipping URL: $url")
+            return true
+        }
+        return false
     }
 
     init {
@@ -446,6 +460,7 @@ class BaiduSyncer(
 
         log("Starting")
         readerUrlRegex = Regex(config.reader)
+        skipperUrlRegex = Regex(config.skipper)
         loadState()
         updateCachePages()
 
@@ -816,7 +831,7 @@ class BaiduSyncer(
     }
 
     // Caches the URL to a local file.
-    private fun cacheUrl(webView: NinjaWebView, url: String, now: Long) {
+    private fun cacheUrl(webView: EBWebView, url: String, now: Long) {
         context.externalCacheDir?.let {
             // Note: filename pattern must be synced with cacheRegex.
             val path = it.path + "/cache-" + nextCachedUrlId++ + ".mht"
@@ -848,7 +863,7 @@ class BaiduSyncer(
         cachedUrls = cachedUrls.filterValues {
             now - it.third < config.lifetime * 1000L
         }.toMutableMap()
-        context.getExternalFilesDir(null)?.let { dir ->
+        context.externalCacheDir?.let { dir ->
             val cachedPaths = cachedUrls.map { it.value.first }.toSet()
             dir.listFiles()?.filter { cacheRegex.matches(it.path) && !cachedPaths.contains(it.path) }
                 ?.map {
@@ -864,11 +879,11 @@ class BaiduSyncer(
     private fun preload(offline: Boolean) {
         if (!config.preloading) return
 
-        val seen = mutableSetOf<Pair<NinjaWebView, String>>()
+        val seen = mutableSetOf<Pair<EBWebView, String>>()
         val total = runAndWait(period = config.wait * 1000L, max = Int.MAX_VALUE) {
             var result = Pair(true, 0)
             for (controller in browserContainer.list().take(config.slots)) {
-                val webView = controller as NinjaWebView
+                val webView = controller as EBWebView
                 val url = webView.initAlbumUrl
                 if (!shouldPreloadUrl(webView, url, seen)) continue
                 preloadUrl(webView, url, offline)
@@ -882,9 +897,9 @@ class BaiduSyncer(
 
     // Whether to preload the URL or skip it.
     private fun shouldPreloadUrl(
-        webView: NinjaWebView,
+        webView: EBWebView,
         url: String,
-        seen: MutableSet<Pair<NinjaWebView, String>>
+        seen: MutableSet<Pair<EBWebView, String>>
     ): Boolean {
         val key = Pair(webView, url)
         if (key in seen) return false
@@ -894,7 +909,7 @@ class BaiduSyncer(
     }
 
     // Preloads the URL in the specified WebView.
-    private fun preloadUrl(webView: NinjaWebView, url: String, offline: Boolean) {
+    private fun preloadUrl(webView: EBWebView, url: String, offline: Boolean) {
         log(Log.DEBUG, "Preloading $url")
         if (offline) {
             loadUrlFromCache(webView, url)
@@ -904,7 +919,7 @@ class BaiduSyncer(
     }
 
     // Load URL from local cache if available.
-    private fun loadUrlFromCache(webView: NinjaWebView, url: String) {
+    private fun loadUrlFromCache(webView: EBWebView, url: String) {
         val path = synchronized(cachedUrls) {
             cachedUrls[url]?.first ?: ""
         }
@@ -915,8 +930,9 @@ class BaiduSyncer(
     }
 
     // Load page title from local cache if available.
-    private fun loadTitleFromCache(webView: NinjaWebView, url: String) {
+    private fun loadTitleFromCache(webView: EBWebView, url: String) {
         val title = synchronized(cachedUrls) {
+            log("DBG 60: ${cachedUrls[url]}")
             cachedUrls[url]?.second ?: ""
         }
         if (title.isBlank()) return
@@ -924,7 +940,7 @@ class BaiduSyncer(
     }
 
     // Enter or exit reader mode as appropriate.
-    private fun adjustReaderMode(webView: NinjaWebView, url: String) {
+    private fun adjustReaderMode(webView: EBWebView, url: String) {
         if (!recentlyAdjustedUrls.contains(url) &&
             readerUrlRegex.matches(url) != webView.isReaderModeOn) {
             log(Log.DEBUG, "Toggling reader mode from ${webView.isReaderModeOn} for $url")
@@ -943,7 +959,7 @@ class BaiduSyncer(
         }
         handler.postDelayed({
             browserContainer.list().forEach { controller ->
-                val webView = controller as NinjaWebView
+                val webView = controller as EBWebView
                 val url = webView.albumUrl.ifBlank { webView.initAlbumUrl }
                 lookup[url]?.let { pair ->
                     webView.initAlbumUrl = pair.first

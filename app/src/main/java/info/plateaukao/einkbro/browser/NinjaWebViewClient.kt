@@ -137,6 +137,11 @@ class EBWebViewClient(
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
         handleUri(view, request.url)
 
+    private var handleUriAction: (String) -> Boolean = { false }
+    fun setHandleUriAction(action: (String) -> Boolean) {
+        handleUriAction = action
+    }
+
     private fun handleUri(webView: WebView, uri: Uri): Boolean {
         val url = uri.toString()
         Log.d("ebWebViewClient", "handleUri: $url")
@@ -154,6 +159,12 @@ class EBWebViewClient(
             val requestToken = url.substringAfter("code=", "")
             ebWebView.handlePocketRequestToken(requestToken)
             return true
+        }
+
+        if (url != "about:blank") {
+            if (handleUriAction(url)) {
+                return true
+            }
         }
 
         if (url.startsWith("http")) {
