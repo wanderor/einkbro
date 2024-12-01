@@ -309,8 +309,8 @@ class BaiduSyncer(
     private var cachedUrls: MutableMap<String, Triple<String, String, Long>> = mutableMapOf()
     // ID of the next cached URL.
     private var nextCachedUrlId: Long = 0
-    // Whether the previous caching operation has finished all pages.
-    private var cacheDone: Boolean = false
+    // URLs that should be, but are not yet, cached.
+    private var urlsToCache: MutableList<String> = mutableListOf()
     // URLs that we recently worked on and should avoid duplicate work.
     private var recentlyCachedUrls: MutableSet<String> = mutableSetOf()
     private var recentlyAdjustedUrls: MutableSet<String> = mutableSetOf()
@@ -504,10 +504,14 @@ class BaiduSyncer(
             shortcut = true
             // Note: theoretically we shouldn't call size() here in timer thread
             backfilling = (browserContainer.size() < config.slots * .7 && waitingUrls.isNotEmpty())
-            caching = (!cacheDone && !offline)
+            caching = (urlsToCache.isNotEmpty() && !offline)
         }
 
-        if (backfilling) sync(now, shortcut)
+        if (backfilling) {
+            sync(now, shortcut)
+            prepareUrlsToCache(now)
+            cleanCachedUrls(now)
+        }
         if (caching) cache(now)
         if (backfilling) preload(offline)
         if (backfilling || caching) saveState()
@@ -791,43 +795,36 @@ class BaiduSyncer(
         return null
     }
 
-    // Cache URLs in background.
-    private fun cache(now: Long) {
-        if (!config.caching) return
-
-        val seen = mutableSetOf<String>()
-        // Note: each time we only attempt to cache a few URLs, so that the total time spent and
-        // the risk of interruption is acceptable. We also shuffle the URLs to avoid being blocked
-        // on the same URLs.
+    // Recalculate URLs that should be, but not yet, cached.
+    private fun prepareUrlsToCache(now: Long) {
+        urlsToCache.clear()
+        // Note: Shuffle waiting URLs to avoid being blocked on the same URLs.
         val urls = prevUrls.toList() + waitingUrls.shuffled()
-        val attempted = runAndWait(period = config.wait * 1000L, max = config.slots) {
-            var result = Pair(true, 0)
-            for (url in urls) {
-                if (!shouldCacheUrl(url, seen) || url in recentlyCachedUrls) continue
-                recentlyCachedUrls.add(url)
-                cacheUrl(headlessWebView, url, now)
-                result = Pair(false, 1)
-                break
+        synchronized(cachedUrls) {
+            urls.forEach { url ->
+                if (url !in cachedUrls && url !in recentlyCachedUrls) {
+                    urlsToCache.add(url)
+                    recentlyCachedUrls.add(url)
+                }
             }
-            result
         }
-        cacheDone = (attempted < config.slots)
-
-        val purged = cleanCachedUrls(now)
-        if (attempted > 0 || purged > 0) {
-            val total = synchronized(cachedUrls) { cachedUrls.size }
-            display("Cache: $total total, $attempted attempted, $purged purged")
+        if (urlsToCache.isNotEmpty()) {
+            display("Cache: ${urlsToCache.size} to be cached, now ${cachedUrls.size}")
         }
     }
 
-    // Whether to cache the URL or skip it.
-    private fun shouldCacheUrl(url: String, seen: MutableSet<String>): Boolean {
-        if (url in seen) return false
-        seen.add(url)
-        synchronized(cachedUrls) {
-            if (url in cachedUrls) return false
+    // Cache URLs in background.
+    private fun cache(now: Long) {
+        if (!config.caching || urlsToCache.isEmpty()) return
+
+        // Note: each time we only attempt to cache a few URLs, so that the total time spent and
+        // the risk of interruption is acceptable.
+        val urls = urlsToCache.take(config.slots)
+        urlsToCache = urlsToCache.subList(urls.size, urlsToCache.size)
+        runAndWait(period = config.wait * 1000L, max = urls.size) { index ->
+            cacheUrl(headlessWebView, urls[index], now)
         }
-        return true
+        log("Cache: ${urls.size} attempted")
     }
 
     // Caches the URL to a local file.
@@ -858,7 +855,7 @@ class BaiduSyncer(
     }
 
     // Cleans cache of recently closed URLs. Removes obsolete URLs and limit cache size.
-    private fun cleanCachedUrls(now: Long): Int {
+    private fun cleanCachedUrls(now: Long) {
         var count = 0
         cachedUrls = cachedUrls.filterValues {
             now - it.third < config.lifetime * 1000L
@@ -872,40 +869,37 @@ class BaiduSyncer(
                     ++count
                 }
         }
-        return count
+
+        if (count > 0) {
+            display("Cache: $count purged")
+        }
     }
 
     // Preloads inactive tabs in background.
     private fun preload(offline: Boolean) {
         if (!config.preloading) return
 
-        val seen = mutableSetOf<Pair<EBWebView, String>>()
-        val total = runAndWait(period = config.wait * 1000L, max = Int.MAX_VALUE) {
-            var result = Pair(true, 0)
-            for (controller in browserContainer.list().take(config.slots)) {
-                val webView = controller as EBWebView
+        // Prepare candidates to preload.
+        val candidates = mutableListOf<Pair<EBWebView, String>>()
+        runAndWait(period = 1000) {
+            browserContainer.list().take(config.slots).forEach {
+                val webView = it as EBWebView
                 val url = webView.initAlbumUrl
-                if (!shouldPreloadUrl(webView, url, seen)) continue
-                preloadUrl(webView, url, offline)
-                result = Pair(false, 1)
-                break
+                if (!isLoaded(webView) && url.isNotEmpty()) {
+                    candidates.add(Pair(webView, url))
+                }
             }
-            result
         }
-        log("Preloaded $total inactive tabs")
-    }
+        if (candidates.isEmpty()) return
 
-    // Whether to preload the URL or skip it.
-    private fun shouldPreloadUrl(
-        webView: EBWebView,
-        url: String,
-        seen: MutableSet<Pair<EBWebView, String>>
-    ): Boolean {
-        val key = Pair(webView, url)
-        if (key in seen) return false
-        seen.add(key)
-        if (isLoaded(webView) || url.isEmpty()) return false
-        return true
+        // Preload prepared candidates.
+        runAndWait(period = config.wait * 1000L, max = candidates.size) { index ->
+            val (webView, url) = candidates[index]
+            if (!isLoaded(webView) && webView.initAlbumUrl == url) {
+                preloadUrl(webView, url, offline)
+            }
+        }
+        log("Preloaded ${candidates.size} inactive tabs")
     }
 
     // Preloads the URL in the specified WebView.
@@ -982,41 +976,22 @@ class BaiduSyncer(
                 .toSet()
             log("Listed ${urls.size} URLs from ${controllers.size} tabs")
             result = urls
-            Pair(true, 0)
         }
         return result
     }
 
     // Runs an action and waits for its completion.
     // `period`: period to wait in each round in milliseconds.
-    // `max`: maximal accumulated progress, or 0 to run once only.
-    // `action`: function to run in each round. It should return a pair:
-    // - `done`: (Boolean) Whether to end the repeated action.
-    // - `progress`: (Int) this function accumulates this value and returns the sum.
-    // Return: accumulated sum of `progress` values.
-    private fun runAndWait(period: Long, max: Int = 0,
-                           action: () -> Pair<Boolean, Int>): Int {
-        val lock = Object()
-        var done = false
-        var total = 0
-
-        var firstRun = true
-        var loopDone = false
-        while (!loopDone) {
-            if (total < max || firstRun) {
-                handler.post {
-                    val result = action()
-                    synchronized(lock) {
-                        total += result.second
-                        if (total >= max || result.first) { done = true }
-                    }
-                }
-                firstRun = false
+    // `max`: maximal number of iterations to run. Specifically, 1 to run once only.
+    // `action`: function to run in each round.
+    private fun runAndWait(period: Long, max: Int = 1,
+                           action: (Int) -> Unit) {
+        for (index in 0..<max) {
+            handler.post {
+                action(index)
             }
             Thread.sleep(period)
-            synchronized(lock) { loopDone = done }
         }
-        return total
     }
 
     // Opens the specified URLs in the local browser.
