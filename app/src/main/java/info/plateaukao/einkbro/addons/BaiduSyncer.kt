@@ -601,7 +601,7 @@ class BaiduSyncer(
             if (slots > 0) {
                 val urlsToOpen = allUrlsToOpen.take(slots)
                 newOpenUrls = newOpenUrls union urlsToOpen
-                val slotsFirst = max(slots - urlsToClose.size, 0)
+                val slotsFirst = max(slots - urlsToClose.size, 1)
                 val slotsLast = slots - slotsFirst
                 urlsToOpenFirst = urlsToOpen.take(slotsFirst)
                 urlsToOpenLast = urlsToOpen.takeLast(slotsLast)
