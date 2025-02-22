@@ -8,8 +8,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.View
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
@@ -156,12 +154,12 @@ private interface BaiduCloudService {
 // The basic assumption is: it is OK to open excessive web pages, but not OK to close
 // web pages unintentionally.
 class BaiduSyncer(
-    _context: Context,
-    _view: View,
-    _browserContainer: BrowserContainer,
-    _browserController: BrowserController,
-    _openUrls: (Set<String>) -> Unit,
-    _registry: ActivityResultRegistry
+    private val context: Context,
+    private val view: View,
+    private val browserContainer: BrowserContainer,
+    private val browserController: BrowserController,
+    private val openUrlsFunc: (Set<String>) -> Unit,
+    private val registry: ActivityResultRegistry
 ) {
     companion object {
         // Tag for logging.
@@ -198,7 +196,7 @@ class BaiduSyncer(
         private const val MAX_RECENTLY_WORKED_URLS: Int = 1000
 
         // Normalizes the URL of an album controller for dedup.
-        public fun normalizeUrl(controller: AlbumController): String {
+        fun normalizeUrl(controller: AlbumController): String {
             var url = controller.albumUrl
             if (!url.startsWith("http")) {
                 url = controller.initAlbumUrl
@@ -208,7 +206,7 @@ class BaiduSyncer(
         }
 
         // Normalizes a URL for dedup.
-        public fun normalizeUrl(url: String): String {
+        fun normalizeUrl(url: String): String {
             // Removes hash.
             val pos = url.indexOf('#')
             if (pos > 0) {
@@ -265,17 +263,11 @@ class BaiduSyncer(
     }
 
     // For GUI interactions.
-    private val context: Context = _context
-    private val view: View = _view
-    private val browserContainer: BrowserContainer = _browserContainer
-    private val browserController: BrowserController = _browserController
-    private val openUrlsFunc: ((Set<String>) -> Unit) = _openUrls
-    private val registry: ActivityResultRegistry = _registry
     private val handler: Handler = Handler(Looper.getMainLooper())
 
     // For loading and persisting state.
     private val sharedPreferences: SharedPreferences =
-        _context.getSharedPreferences("baidu", Context.MODE_PRIVATE)
+        context.getSharedPreferences("baidu", Context.MODE_PRIVATE)
     // For loading URLs in background, e.g. for caching.
     private val headlessWebView: EBWebView = EBWebView(context, browserController)
 
@@ -339,7 +331,7 @@ class BaiduSyncer(
         var urlsToClose: Set<String> = setOf()
     )
 
-    public fun onPageFinished(webView: EBWebView) {
+    fun onPageFinished(webView: EBWebView) {
         handler.postDelayed({
             if (webView.albumUrl.startsWith("http")) {
                 if (isLoaded(webView)) {
@@ -356,7 +348,7 @@ class BaiduSyncer(
         }, 2000)
     }
 
-    public fun handleUri(url: String): Boolean {
+    fun handleUri(url: String): Boolean {
         if (skipperUrlRegex.matches(url)) {
             log(Log.DEBUG, "Skipping URL: $url")
             return true
