@@ -12,6 +12,7 @@ import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.concurrent.atomic.AtomicBoolean
 
 // Base class for functionality unit.
 class AddOnHelper(
@@ -24,11 +25,6 @@ class AddOnHelper(
         // For debugging release version.
         // Whether to always turn on logging to external file.
         private const val ALWAYS_EXTERNAL_LOGGING: Boolean = false
-
-        // For debugging release version.
-        // Path to the external logging file.
-        private const val EXTERNAL_LOG_PATH: String =
-            "/storage/emulated/0/Android/data/info.plateaukao.einkbro/files/addon.log"
     }
 
     var externalLogging: Boolean = false
@@ -48,9 +44,12 @@ class AddOnHelper(
     // Runs an action and waits for its completion.
     // `period`: period to wait in each round in milliseconds.
     // `max`: maximal number of iterations to run. Specifically, 1 to run once only.
+    // `skip`: atomic flag to indicate whether to skip remaining rounds.
     // `action`: function to run in each round.
-    fun runAndWait(period: Long, max: Int = 1, action: (Int) -> Unit) {
-        for (index in 0..<max) {
+    fun runAndWait(period: Long, max: Int = 1, skip: AtomicBoolean? = null,
+                   action: (Int) -> Unit) {
+        for (index in 0 until max) {
+            if (skip?.get() == true) break
             handler.post {
                 action(index)
             }
@@ -123,6 +122,7 @@ class AddOnHelper(
     fun log(priority: Int, message: String) {
         Log.println(priority, tag, message)
 
+        // For debugging release version.
         if (externalLogFile == null && (externalLogging || ALWAYS_EXTERNAL_LOGGING)) {
             context.getExternalFilesDir(null)?.let {
                 val path = "${it.absolutePath}/$name.log"

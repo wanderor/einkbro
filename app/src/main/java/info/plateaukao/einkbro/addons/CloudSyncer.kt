@@ -8,14 +8,13 @@ import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.browser.BrowserContainer
 import info.plateaukao.einkbro.browser.BrowserController
 import info.plateaukao.einkbro.view.EBWebView
-import kotlin.math.max
-import kotlin.math.min
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.timer
 
 // Represents browser state data to be read from and written to the cloud.
@@ -54,7 +53,7 @@ class CloudSyncer(
         private const val VERSION: String = "1.0.0"
 
         // Maximal number of recently worked URLs to temporarily keep.
-        private const val MAX_RECENTLY_WORKED_URLS: Int = 1000
+        private const val MAX_RECENTLY_WORKED_URLS: Int = 1_000
 
         // Normalizes the URL of an album controller for dedup.
         fun normalizeUrl(controller: AlbumController): String {
@@ -94,7 +93,9 @@ class CloudSyncer(
 
     // Configuration.
     private var config: CloudSyncerConfig = CloudSyncerConfig()
-    // Timestamp of the last actions.
+    // Whether to force a sync action in the next heartbeat.
+    private var forceSync: AtomicBoolean = AtomicBoolean(false)
+    // Timestamp of the last sync action.
     private var lastSyncTime: Long = 0
     // We check 2 timestamps when reading from the cloud:
     // - cloud file mtime.
@@ -104,7 +105,7 @@ class CloudSyncer(
     // Previously seen open URLs in local device.
     private var prevUrls: Set<String> = setOf<String>()
     // URLs received from the cloud but not yet open (i.e. throttled).
-    private var waitingUrls: Set<String> = setOf()
+    private var waitingUrls: List<String> = listOf()
     // Open and closed URLs previously written to the cloud.
     private var writtenUrls: Set<String> = setOf<String>()
     private var writtenClosedUrls: Map<String, Long> = mapOf()
@@ -128,6 +129,7 @@ class CloudSyncer(
     private var recentlyAdjustedUrls: MutableSet<String> = mutableSetOf()
     private var offline: Boolean = false
 
+    // For loading configuration file flexibly.
     private val configLoader: ConfigLoader<CloudSyncerConfig>
 
     // For formatting date strings in BrowserState.
@@ -144,6 +146,12 @@ class CloudSyncer(
     )
 
     fun onPageFinished(webView: EBWebView) {
+        if (webView.albumUrl.startsWith("http") &&
+            prevUrls.isNotEmpty() && webView.albumUrl !in prevUrls) {
+            forceSync.set(true)
+            helper.log(Log.DEBUG, "Forcing sync in next heartbeat: ${webView.albumUrl}")
+        }
+
         helper.handler.postDelayed({
             if (webView.albumUrl.startsWith("http")) {
                 if (isLoaded(webView)) {
@@ -157,7 +165,7 @@ class CloudSyncer(
                     adjustReaderMode(webView, webView.initAlbumUrl)
                 }
             }
-        }, 2000)
+        }, 2_000)
     }
 
     fun handleUri(url: String): Boolean {
@@ -181,7 +189,7 @@ class CloudSyncer(
         this.config = config
 
         helper.externalLogging = config.logging
-        helper.displayMs = config.display * 1000L
+        helper.displayMs = config.display * 1_000L
 
         agent.applyConfig(config)
     }
@@ -201,8 +209,10 @@ class CloudSyncer(
 
     // Starts timer for periodical sync.
     private fun startTimer() {
-        timer(daemon = true, initialDelay = config.startup * 1000L,
-            period = config.heartbeat * 1000L) {
+        timer(
+            daemon = true, initialDelay = config.startup * 1_000L,
+            period = config.heartbeat * 1_000L
+        ) {
             try {
                 heartbeat()
             } catch (e: Exception) {
@@ -212,19 +222,23 @@ class CloudSyncer(
     }
 
     private fun heartbeat() {
-        val prevOffline = offline
+        // Checks offline status.
         val transports = mutableListOf<String>()
-        offline = helper.isOffline(transports)
-        if (offline != prevOffline) {
-            val status = if (offline) "offline" else "online [${transports.joinToString()}]"
-            helper.display("Network change: $status")
+        helper.isOffline(transports).let {
+            if (it != offline) {
+                offline = it
+                val status = if (offline) "offline" else "online [${transports.joinToString()}]"
+                helper.display("Network change: $status")
+            }
         }
 
+        // Decides actions to take.
         val now = Date().time
         var shortcut = false
         var backfilling = true
         var caching = true
-        if (now >= lastSyncTime + config.interval * 1000L && !offline) {  // full path
+        if ((now >= lastSyncTime + config.interval * 1_000L || forceSync.get())
+            && !offline) {  // full path
             lastSyncTime = now  // update even if action fails
             // Note: prevent infinite memory growth.
             if (recentlyCachedUrls.size > MAX_RECENTLY_WORKED_URLS) recentlyCachedUrls.clear()
@@ -236,8 +250,10 @@ class CloudSyncer(
             caching = (urlsToCache.isNotEmpty() && !offline)
         }
 
+        // Take actions.
         if (backfilling) {
             sync(now, shortcut)
+            forceSync.set(false)
             prepareUrlsToCache(now)
             cleanCachedUrls(now)
         }
@@ -273,7 +289,7 @@ class CloudSyncer(
 
     // Synchronizes between local and cloud.
     private fun sync(now: Long, shortcut: Boolean) {
-        helper.log("Sync started: sending=${config.sending}, receiving=${config.receiving}")
+        helper.log("Sync started: shortcut=$shortcut, sending=${config.sending}, receiving=${config.receiving}")
 
         // Gathers local information.
         val openUrls = listUrls()
@@ -316,25 +332,23 @@ class CloudSyncer(
     // - We cannot simply close all URLs before opening all URLs, as the closing step might close
     //   the last active URL and thus cause the app to quit. On the other hand, we cannot simply
     //   open all URLs before closing all URLs, as it might cause a memory surge and kill the app.
+    // - Prefer to open newest URLs.
     private fun applyMerge(openUrls: Set<String>, merger: Merger) {
-        // Calculates URLs to open and close.
+        // Calculates URLs to open and close. Updates local state accordingly.
         val urlsToClose = openUrls intersect merger.urlsToClose
-        var newOpenUrls = openUrls subtract urlsToClose
+        waitingUrls = merger.urlsToOpen.toList() + waitingUrls.filterNot { it in merger.urlsToClose }
+        prevUrls = openUrls subtract urlsToClose
         var urlsToOpenFirst: List<String> = listOf()
         var urlsToOpenLast: List<String> = listOf()
-        var slots = max(config.slots - openUrls.size + urlsToClose.size, 0)
+        val slots = (config.slots - openUrls.size + urlsToClose.size).coerceIn(0, waitingUrls.size)
         if (slots > 0) {
-            val allUrlsToOpen =
-                merger.urlsToOpen union (waitingUrls subtract merger.urlsToClose)
-            slots = min(slots, allUrlsToOpen.size)
-            if (slots > 0) {
-                val urlsToOpen = allUrlsToOpen.take(slots)
-                newOpenUrls = newOpenUrls union urlsToOpen
-                val slotsFirst = max(slots - urlsToClose.size, 1)
-                val slotsLast = slots - slotsFirst
-                urlsToOpenFirst = urlsToOpen.take(slotsFirst)
-                urlsToOpenLast = urlsToOpen.takeLast(slotsLast)
-            }
+            val slotsFirst = maxOf(slots - urlsToClose.size, 1)
+            val slotsLast = slots - slotsFirst
+            urlsToOpenFirst = waitingUrls.take(slotsFirst)
+            waitingUrls = waitingUrls.drop(slotsFirst)
+            urlsToOpenLast = waitingUrls.take(slotsLast)
+            waitingUrls = waitingUrls.drop(slotsLast)
+            prevUrls = prevUrls union urlsToOpenFirst union urlsToOpenLast
         }
 
         // Opens and closes URLs.
@@ -348,10 +362,6 @@ class CloudSyncer(
             openUrls(urlsToOpenLast)
         }
 
-        // Updates local state.
-        prevUrls = newOpenUrls
-        waitingUrls = merger.curUrls subtract newOpenUrls
-
         // Gives user an update.
         if (merger.cloudSource.isNotEmpty()) {
             helper.display("Synced with ${merger.cloudSource}: $slots opened, ${urlsToClose.size} closed, ${waitingUrls.size} waiting")
@@ -363,7 +373,7 @@ class CloudSyncer(
     // Cleans cache of recently closed URLs. Removes obsolete URLs and limit cache size.
     private fun cleanRecentUrls(now: Long) {
         recentUrls = recentUrls.filterValues { timestamp ->
-            now - timestamp < config.lifetime * 1000L
+            now - timestamp < config.lifetime * 1_000L
         }.toMutableMap()
         if (recentUrls.size <= config.recents) return
         val threshold = recentUrls.values.sortedDescending()[config.recents]
@@ -464,7 +474,8 @@ class CloudSyncer(
         // the risk of interruption is acceptable.
         val urls = urlsToCache.take(config.slots)
         urlsToCache = urlsToCache.subList(urls.size, urlsToCache.size)
-        helper.runAndWait(period = config.wait * 1000L, max = urls.size) { index ->
+        helper.runAndWait(period = config.wait * 1_000L, max = urls.size,
+                          skip = forceSync) { index ->
             cacheUrl(headlessWebView, urls[index], now)
         }
         helper.log("Cache: ${urls.size} attempted")
@@ -492,7 +503,7 @@ class CloudSyncer(
                 }
             })
             webView.setOnPageFinishedAction {
-                helper.chain(1000L, steps)
+                helper.chain(1_000L, steps)
             }
             webView.loadUrl(url)
         }
@@ -502,7 +513,7 @@ class CloudSyncer(
     private fun cleanCachedUrls(now: Long) {
         var count = 0
         cachedUrls = cachedUrls.filterValues {
-            now - it.third < config.lifetime * 1000L
+            now - it.third < config.lifetime * 1_000L
         }.toMutableMap()
         context.externalCacheDir?.let { dir ->
             val cachedPaths = cachedUrls.map { it.value.first }.toSet()
@@ -525,7 +536,7 @@ class CloudSyncer(
 
         // Prepare candidates to preload.
         val candidates = mutableListOf<Pair<EBWebView, String>>()
-        helper.runAndWait(period = 1000) {
+        helper.runAndWait(period = 1_000L) {
             browserContainer.list().take(config.slots).forEach {
                 val webView = it as EBWebView
                 val url = webView.initAlbumUrl
@@ -537,7 +548,8 @@ class CloudSyncer(
         if (candidates.isEmpty()) return
 
         // Preload prepared candidates.
-        helper.runAndWait(period = config.wait * 1000L, max = candidates.size) { index ->
+        helper.runAndWait(period = config.wait * 1_000L, max = candidates.size,
+                          skip = forceSync) { index ->
             val (webView, url) = candidates[index]
             if (!isLoaded(webView) && webView.initAlbumUrl == url) {
                 preloadUrl(webView, url, offline)
@@ -604,13 +616,13 @@ class CloudSyncer(
                     helper.log(Log.DEBUG, "Updated cache page: $url -> [${webView.albumTitle}] ${webView.initAlbumUrl}")
                 }
             }
-        }, config.startup * 1000L)
+        }, config.startup * 1_000L)
     }
 
     // Lists normalized URLs of the currently open web pages in the local browser.
     private fun listUrls(): Set<String> {
         lateinit var result: Set<String>
-        helper.runAndWait(period = 1000) {
+        helper.runAndWait(period = 1_000L) {
             val controllers = browserContainer.list()
             val urls = controllers
                 .filter { !it.isTranslatePage }
@@ -631,7 +643,7 @@ class CloudSyncer(
             helper.handler.post {
                 openUrlsFunc(subset)
             }
-            Thread.sleep(config.wait * 1000L)
+            Thread.sleep(config.wait * 1_000L)
         }
     }
 
