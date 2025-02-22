@@ -62,13 +62,13 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.get
 import androidx.core.view.isVisible
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.snackbar.Snackbar
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.addons.BaiduSyncer
+import info.plateaukao.einkbro.addons.CloudSyncer
 import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.browser.BrowserContainer
 import info.plateaukao.einkbro.browser.BrowserController
@@ -304,7 +304,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
     private lateinit var openEpubFilePickerLauncher: ActivityResultLauncher<Intent>
 
-    private lateinit var baiduSyncer: BaiduSyncer
+    private lateinit var cloudSyncer: CloudSyncer
 
     // Classes
     private inner class VideoCompletionListener : OnCompletionListener,
@@ -381,14 +381,12 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         handleWindowInsets()
         listenKeyboardShowHide()
 
-        val openUrls = { urls: Set<String> ->
-            urls.forEach  { url ->
-                addAlbum(url = url, foreground = false)
+        cloudSyncer = BaiduSyncer.create(this, mainContentLayout, activityResultRegistry,
+                                         browserContainer, this) { urls ->
+            urls.forEach {
+                addAlbum(url = it, foreground = false)
             }
         }
-        baiduSyncer = BaiduSyncer(
-            this, mainContentLayout, browserContainer, this,
-            openUrls, activityResultRegistry)
 
         // post delay to update filter list
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -1914,8 +1912,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             this.albumTitle = title
             this.incognito = incognito
             setOnTouchListener(createMultiTouchTouchListener(this))
-            setOnPageFinishedAction { baiduSyncer.onPageFinished(this) }
-            setHandleUriAction {url -> baiduSyncer.handleUri(url)}
+            setOnPageFinishedAction { cloudSyncer.onPageFinished(this) }
+            setHandleUriAction {url -> cloudSyncer.handleUri(url)}
         }
 
         maybeCreateNewPreloadWebView(enablePreloadWebView, newWebView)
@@ -2060,7 +2058,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     override fun removeAlbum(albumController: AlbumController, showHome: Boolean) {
         closeTabConfirmation {
             if (config.isSaveHistoryWhenClose()) {
-                addHistory(albumController.albumTitle, BaiduSyncer.normalizeUrl(albumController))
+                addHistory(albumController.albumTitle, CloudSyncer.normalizeUrl(albumController))
             }
 
             albumViewModel.removeAlbum(albumController.album)
