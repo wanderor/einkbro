@@ -1107,7 +1107,7 @@ open class EBWebView(
         """
 
         private const val readabilityOptions =
-            "{classesToPreserve: preservedClasses}"
+            "{classesToPreserve: preservedClasses, overwriteImgSrc: true}"
 
         private const val replaceWithReaderModeBodyJs = """
             var documentClone = document.cloneNode(true);

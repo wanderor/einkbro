@@ -44,12 +44,12 @@ class AddOnHelper(
     // Runs an action and waits for its completion.
     // `period`: period to wait in each round in milliseconds.
     // `max`: maximal number of iterations to run. Specifically, 1 to run once only.
-    // `skip`: atomic flag to indicate whether to skip remaining rounds.
+    // `skip`: callback that returns true to skip remaining rounds, or false to continue.
     // `action`: function to run in each round.
-    fun runAndWait(period: Long, max: Int = 1, skip: AtomicBoolean? = null,
+    fun runAndWait(period: Long, max: Int = 1, skip: () -> Boolean = { false },
                    action: (Int) -> Unit) {
         for (index in 0 until max) {
-            if (skip?.get() == true) break
+            if (skip()) break
             handler.post {
                 action(index)
             }

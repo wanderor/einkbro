@@ -2060,6 +2060,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
     override fun removeAlbum(albumController: AlbumController, showHome: Boolean) {
         closeTabConfirmation {
+            cloudSyncer.onPageRemoved()
             if (config.isSaveHistoryWhenClose()) {
                 addHistory(albumController.albumTitle, CloudSyncer.normalizeUrl(albumController))
             }
@@ -2102,6 +2103,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private fun scrollChange() {
         ebWebView.setScrollChangeListener(object : EBWebView.OnScrollChangeListener {
             override fun onScrollChange(scrollY: Int, oldScrollY: Int) {
+                cloudSyncer.onPageScrolled()
+
                 ebWebView.updatePageInfo()
 
                 if (::twoPaneController.isInitialized) {

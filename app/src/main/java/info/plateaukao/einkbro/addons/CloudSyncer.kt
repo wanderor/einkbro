@@ -14,7 +14,7 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.timer
 
 // Represents browser state data to be read from and written to the cloud.
@@ -85,6 +85,9 @@ class CloudSyncer(
         }
     }
 
+    @Serializable
+    data class CachedUrlInfo(val path: String, val title: String, val timestamp: Long)
+
     // For loading and persisting state. Note backward compatibility.
     private val sharedPreferences: SharedPreferences =
         context.getSharedPreferences("baidu", Context.MODE_PRIVATE)
@@ -93,8 +96,8 @@ class CloudSyncer(
 
     // Configuration.
     private var config: CloudSyncerConfig = CloudSyncerConfig()
-    // Whether to force a sync action in the next heartbeat.
-    private var forceSync: AtomicBoolean = AtomicBoolean(false)
+    // Time of the next forced sync, or Long.MAX_VALUE if absent.
+    private var forceSyncTime: AtomicLong = AtomicLong(Long.MAX_VALUE)
     // Timestamp of the last sync action.
     private var lastSyncTime: Long = 0
     // We check 2 timestamps when reading from the cloud:
@@ -119,7 +122,7 @@ class CloudSyncer(
     // Note: must be synced with cacheUrl().
     private val cacheRegex = Regex(""".*/cache-\d+\.mht""")
     // (Multi-threaded) Mapping of URL to (path, title, timestamp) for locally cached URLs.
-    private var cachedUrls: MutableMap<String, Triple<String, String, Long>> = mutableMapOf()
+    private var cachedUrls: MutableMap<String, CachedUrlInfo> = mutableMapOf()
     // ID of the next cached URL.
     private var nextCachedUrlId: Long = 0
     // URLs that should be, but are not yet, cached.
@@ -148,8 +151,7 @@ class CloudSyncer(
     fun onPageFinished(webView: EBWebView) {
         if (webView.albumUrl.startsWith("http") &&
             prevUrls.isNotEmpty() && webView.albumUrl !in prevUrls) {
-            forceSync.set(true)
-            helper.log(Log.DEBUG, "Forcing sync in next heartbeat: ${webView.albumUrl}")
+            scheduleForceSync()
         }
 
         helper.handler.postDelayed({
@@ -166,6 +168,12 @@ class CloudSyncer(
                 }
             }
         }, 2_000)
+    }
+
+    fun onPageRemoved() = scheduleForceSync()
+
+    fun onPageScrolled() {
+        if (hasForceSync()) scheduleForceSync()  // postpone
     }
 
     fun handleUri(url: String): Boolean {
@@ -234,26 +242,33 @@ class CloudSyncer(
 
         // Decides actions to take.
         val now = Date().time
-        var shortcut = false
+        var shortcut = true
+        if (!offline) {
+            val cur = forceSyncTime.get()
+            if (now >= cur) {
+                forceSyncTime.compareAndSet(cur, Long.MAX_VALUE)
+                shortcut = false
+            } else if (now >= lastSyncTime + config.interval * 1_000L) {
+                shortcut = false
+            }
+        }
+
         var backfilling = true
         var caching = true
-        if ((now >= lastSyncTime + config.interval * 1_000L || forceSync.get())
-            && !offline) {  // full path
+        if (shortcut) {  // shortcut path
+            // Note: theoretically we shouldn't call size() here in timer thread
+            backfilling = (browserContainer.size() < config.slots * .7 && waitingUrls.isNotEmpty())
+            caching = (urlsToCache.isNotEmpty() && !offline && !hasForceSync())
+        } else {  // full path
             lastSyncTime = now  // update even if action fails
             // Note: prevent infinite memory growth.
             if (recentlyCachedUrls.size > MAX_RECENTLY_WORKED_URLS) recentlyCachedUrls.clear()
             if (recentlyAdjustedUrls.size > MAX_RECENTLY_WORKED_URLS) recentlyAdjustedUrls.clear()
-        } else {  // shortcut path
-            shortcut = true
-            // Note: theoretically we shouldn't call size() here in timer thread
-            backfilling = (browserContainer.size() < config.slots * .7 && waitingUrls.isNotEmpty())
-            caching = (urlsToCache.isNotEmpty() && !offline)
         }
 
         // Take actions.
         if (backfilling) {
             sync(now, shortcut)
-            forceSync.set(false)
             prepareUrlsToCache(now)
             cleanCachedUrls(now)
         }
@@ -473,12 +488,20 @@ class CloudSyncer(
         // Note: each time we only attempt to cache a few URLs, so that the total time spent and
         // the risk of interruption is acceptable.
         val urls = urlsToCache.take(config.slots)
-        urlsToCache = urlsToCache.subList(urls.size, urlsToCache.size)
+        val attempted = mutableSetOf<String>()
         helper.runAndWait(period = config.wait * 1_000L, max = urls.size,
-                          skip = forceSync) { index ->
-            cacheUrl(headlessWebView, urls[index], now)
+                          skip = { hasForceSync() }) { index ->
+            val url = urls[index]
+            synchronized(attempted) {
+                attempted.add(url)
+            }
+            cacheUrl(headlessWebView, url, now)
         }
-        helper.log("Cache: ${urls.size} attempted")
+
+        synchronized(attempted) {
+            helper.log(Log.DEBUG, "Cache: ${attempted.size} / ${urls.size} attempted")
+            urlsToCache.removeIf { it in attempted }
+        }
     }
 
     // Caches the URL to a local file.
@@ -497,7 +520,7 @@ class CloudSyncer(
                     val title = webView.albumTitle  // note: needs delay to work
                     webView.saveWebArchive(path, false) {
                         synchronized(cachedUrls) {
-                            cachedUrls[url] = Triple(path, title, now)
+                            cachedUrls[url] = CachedUrlInfo(path, title, now)
                         }
                     }
                 }
@@ -513,10 +536,10 @@ class CloudSyncer(
     private fun cleanCachedUrls(now: Long) {
         var count = 0
         cachedUrls = cachedUrls.filterValues {
-            now - it.third < config.lifetime * 1_000L
+            now - it.timestamp < config.lifetime * 1_000L
         }.toMutableMap()
         context.externalCacheDir?.let { dir ->
-            val cachedPaths = cachedUrls.map { it.value.first }.toSet()
+            val cachedPaths = cachedUrls.map { it.value.path }.toSet()
             dir.listFiles()?.filter { cacheRegex.matches(it.path) && !cachedPaths.contains(it.path) }
                 ?.map {
                     helper.log(Log.DEBUG, "Deleting cache file: ${it.path}")
@@ -549,7 +572,7 @@ class CloudSyncer(
 
         // Preload prepared candidates.
         helper.runAndWait(period = config.wait * 1_000L, max = candidates.size,
-                          skip = forceSync) { index ->
+                          skip = { !offline && hasForceSync() }) { index ->
             val (webView, url) = candidates[index]
             if (!isLoaded(webView) && webView.initAlbumUrl == url) {
                 preloadUrl(webView, url, offline)
@@ -571,7 +594,7 @@ class CloudSyncer(
     // Load URL from local cache if available.
     private fun loadUrlFromCache(webView: EBWebView, url: String) {
         val path = synchronized(cachedUrls) {
-            cachedUrls[url]?.first ?: ""
+            cachedUrls[url]?.path ?: ""
         }
         if (path.isBlank() || !File(path).exists()) return
         helper.log(Log.DEBUG, "Loading $url from cache: $path")
@@ -582,7 +605,7 @@ class CloudSyncer(
     // Load page title from local cache if available.
     private fun loadTitleFromCache(webView: EBWebView, url: String) {
         val title = synchronized(cachedUrls) {
-            cachedUrls[url]?.second ?: ""
+            cachedUrls[url]?.title ?: ""
         }
         if (title.isBlank()) return
         webView.albumTitle = title
@@ -602,8 +625,8 @@ class CloudSyncer(
     private fun updateCachePages() {
         val lookup = mutableMapOf<String, Pair<String, String>>()  // path -> (url, title)
         synchronized(cachedUrls) {
-            cachedUrls.forEach { url, triple ->
-                lookup["file://${triple.first}"] = Pair(url, triple.second)
+            cachedUrls.forEach { url, info ->
+                lookup["file://${info.path}"] = Pair(url, info.title)
             }
         }
         helper.handler.postDelayed({
@@ -658,5 +681,11 @@ class CloudSyncer(
                 browserController.removeAlbum(it, false)
             }
         }
+    }
+
+    private fun hasForceSync() = forceSyncTime.get() < Long.MAX_VALUE
+
+    private fun scheduleForceSync() {
+        forceSyncTime.set(Date().time + config.forceSync * 1_000L)
     }
 }

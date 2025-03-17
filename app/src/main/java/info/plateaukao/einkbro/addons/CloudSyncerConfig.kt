@@ -28,6 +28,8 @@ data class CloudSyncerConfig(
     val slots: Int = 20,
     // Time to wait between loading URLs in seconds.
     val wait: Int = 15,
+    // Time to wait before a forced sync in seconds.
+    val forceSync: Int = 180,
     // Maximal number of recently closed URLs to be cached.
     val recents: Int = 200,
     // Maximal duration in seconds for a URL to stay in cache.

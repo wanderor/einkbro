@@ -27,4 +27,4 @@
 -keepclassmembers class * {
   @com.google.gson.annotations.SerializedName <fields>;
 }
--keepclassmembers class info.plateaukao.einkbro.addons.BrowserFile* { *; }
+-keepclassmembers class info.plateaukao.einkbro.addons.BaiduFile* { *; }
