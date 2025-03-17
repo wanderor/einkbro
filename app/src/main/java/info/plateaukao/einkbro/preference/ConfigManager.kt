@@ -137,13 +137,23 @@ class ConfigManager(
     var enableInplaceParagraphTranslate by
     BooleanPreference(sp, K_ENABLE_IN_PLACE_PARAGRAPH_TRANSLATE, true)
 
+    private var originalSaveHistoryMode: SaveHistoryMode? = null
     var isIncognitoMode: Boolean
         get() = sp.getBoolean(K_IS_INCOGNITO_MODE, false)
         set(value) {
-            if (!value) {
-                cookies = false
+            cookies = !value
+            if (value) {
+                originalSaveHistoryMode = saveHistoryMode
                 saveHistoryMode = SaveHistoryMode.DISABLED
+            } else {
+                if (originalSaveHistoryMode != null) {
+                    saveHistoryMode = originalSaveHistoryMode!!
+                    originalSaveHistoryMode = null
+                } else {
+                    saveHistoryMode = toggledSaveHistoryMode
+                }
             }
+
             sp.edit { putBoolean(K_IS_INCOGNITO_MODE, value) }
         }
 
@@ -189,6 +199,9 @@ class ConfigManager(
 
     var fontBoldness by IntPreference(sp, K_FONT_BOLDNESS, 700)
 
+    private val K_PADDING_FOR_READER_MODE = "sp_padding_for_reader_mode"
+    var paddingForReaderMode by IntPreference(sp, K_PADDING_FOR_READER_MODE, 10)
+
     var customUserAgent by StringPreference(sp, K_CUSTOM_USER_AGENT)
     val customProcessTextUrl by StringPreference(sp, K_CUSTOM_PROCESS_TEXT_URL)
     var preferredTranslateLanguageString by StringPreference(sp, K_TRANSLATED_LANGS)
@@ -228,7 +241,7 @@ class ConfigManager(
     var gptUserPromptForWebPage by StringPreference(
         sp,
         K_GPT_USER_PROMPT_WEB_PAGE,
-        "Summarize in 300 words:"
+        "Summarize in 50 words:"
     )
     var imageApiKey by StringPreference(sp, K_IMAGE_API_KEY, "")
     var gptModel by StringPreference(sp, K_GPT_MODEL, "gpt-3.5-turbo")
@@ -1083,6 +1096,8 @@ enum class TranslationMode(val labelResId: Int) {
     PAPAGO_TRANSLATE_BY_PARAGRAPH(R.string.papago_translate_by_paragraph),
     PAPAGO_TRANSLATE_BY_SCREEN(R.string.papago_translate_by_screen),
     DEEPL_BY_PARAGRAPH(R.string.deepl_translate_by_paragraph),
+    OPENAI_BY_PARAGRAPH(R.string.openai_translate_by_paragraph),
+    GEMINI_BY_PARAGRAPH(R.string.gemini_translate_by_paragraph),
 }
 
 enum class FontType(val resId: Int) {
@@ -1090,7 +1105,7 @@ enum class FontType(val resId: Int) {
     SERIF(R.string.serif),
     GOOGLE_SERIF(R.string.googleserif),
     CUSTOM(R.string.custom_font),
-    TC_WENKAI(R.string.wenkai_tc),
+    TC_IANSUI(R.string.iansui_tc),
     JA_MINCHO(R.string.mincho_ja),
     KO_GAMJA(R.string.gamja_flower_ko)
 }

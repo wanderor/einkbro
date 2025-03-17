@@ -59,6 +59,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -103,9 +105,9 @@ import info.plateaukao.einkbro.unit.pruneWebTitle
 import info.plateaukao.einkbro.unit.toRawPoint
 import info.plateaukao.einkbro.util.Constants.Companion.ACTION_DICT
 import info.plateaukao.einkbro.util.TranslationLanguage
-import info.plateaukao.einkbro.view.MultitouchListener
 import info.plateaukao.einkbro.view.EBToast
 import info.plateaukao.einkbro.view.EBWebView
+import info.plateaukao.einkbro.view.MultitouchListener
 import info.plateaukao.einkbro.view.SwipeTouchListener
 import info.plateaukao.einkbro.view.dialog.BookmarkEditDialog
 import info.plateaukao.einkbro.view.dialog.DialogManager
@@ -234,7 +236,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     private var shouldLoadTabState: Boolean = false
 
     private val toolbarActionHandler: ToolbarActionHandler by lazy {
-        ToolbarActionHandler(this, ebWebView)
+        ToolbarActionHandler(this)
     }
 
     private val albumViewModel: AlbumViewModel by viewModels()
@@ -255,16 +257,23 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         )
     }
 
-    override fun newATab() = when (config.newTabBehavior) {
-        NewTabBehavior.START_INPUT -> {
-            addAlbum(getString(R.string.app_name), "")
-            focusOnInput()
+    override fun newATab() {
+        // fix: https://github.com/plateaukao/einkbro/issues/343
+        if (searchOnSite) {
+            hideSearchPanel()
         }
 
-        NewTabBehavior.SHOW_HOME -> addAlbum("", config.favoriteUrl)
-        NewTabBehavior.SHOW_RECENT_BOOKMARKS -> {
-            addAlbum("", "")
-            BrowserUnit.loadRecentlyUsedBookmarks(ebWebView)
+        when (config.newTabBehavior) {
+            NewTabBehavior.START_INPUT -> {
+                addAlbum(getString(R.string.app_name), "")
+                focusOnInput()
+            }
+
+            NewTabBehavior.SHOW_HOME -> addAlbum("", config.favoriteUrl)
+            NewTabBehavior.SHOW_RECENT_BOOKMARKS -> {
+                addAlbum("", "")
+                BrowserUnit.loadRecentlyUsedBookmarks(ebWebView)
+            }
         }
     }
 
@@ -390,23 +399,23 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
         // post delay to update filter list
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            // 如果沒有獲得權限，請求權限
             requestNotificationPermission()
+        } else {
+            binding.root.postDelayed({
+                checkAdBlockerList()
+            }, 1000)
         }
-        binding.root.postDelayed({
-            checkAdBlockerList()
-        }, 1000)
     }
 
     private fun checkAdBlockerList() {
         if (!adFilter.hasInstallation) {
             val map = mapOf(
                 "AdGuard Base" to "https://filters.adtidy.org/extension/chromium/filters/2.txt",
-                "EasyPrivacy Lite" to "https://filters.adtidy.org/extension/chromium/filters/118_optimized.txt",
-                "AdGuard Tracking Protection" to "https://filters.adtidy.org/extension/chromium/filters/3.txt",
-                "AdGuard Annoyances" to "https://filters.adtidy.org/extension/chromium/filters/14.txt",
-                "AdGuard Chinese" to "https://filters.adtidy.org/extension/chromium/filters/224.txt",
-                "NoCoin Filter List" to "https://filters.adtidy.org/extension/chromium/filters/242.txt"
+//                "EasyPrivacy Lite" to "https://filters.adtidy.org/extension/chromium/filters/118_optimized.txt",
+//                "AdGuard Tracking Protection" to "https://filters.adtidy.org/extension/chromium/filters/3.txt",
+//                "AdGuard Annoyances" to "https://filters.adtidy.org/extension/chromium/filters/14.txt",
+//                "AdGuard Chinese" to "https://filters.adtidy.org/extension/chromium/filters/224.txt",
+//                "NoCoin Filter List" to "https://filters.adtidy.org/extension/chromium/filters/242.txt"
             )
             for ((key, value) in map) {
                 filterViewModel.addFilter(key, value)
@@ -415,21 +424,6 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             for ((key, _) in filters) {
                 filterViewModel.download(key)
             }
-//            AlertDialog.Builder(this)
-////                .setTitle(R.string.filter_download_title)
-////                .setMessage(R.string.filter_download_msg)
-//                .setTitle("Filter Download")
-//                .setMessage("Download filters to block ads")
-//                .setCancelable(true)
-//                .setPositiveButton(
-//                    android.R.string.ok
-//                ) { _, _ ->
-//                    val filters = filterViewModel.filters.value ?: return@setPositiveButton
-//                    for ((key, _) in filters) {
-//                        filterViewModel.download(key)
-//                    }
-//                }
-//                .show()
         }
     }
 
@@ -437,11 +431,10 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         val requestPermissionLauncher =
             registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
                 if (isGranted) {
+                    checkAdBlockerList()
                 } else {
                 }
             }
-
-        // 發起權限請求
         requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
@@ -499,8 +492,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         val externalSearchContainer = binding.activityMainContent.externalSearchActionContainer
         externalSearchViewModel.searchActions.forEach { action ->
             val button = TextView(this).apply {
-                height = ViewUnit.dpToPixel(40).toInt()
-                textSize = ViewUnit.dpToPixel(10)
+                height = 40.dp.value.toInt()
+                textSize = 10.sp.value
                 gravity = Gravity.CENTER
                 background = getDrawable(R.drawable.background_with_border)
                 text = action.title.take(2).uppercase(Locale.getDefault())
@@ -568,7 +561,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                             actionModeMenuViewModel.finish()
                         }
                     }
-                    
+
                     is ActionModeMenuState.ReadFromHere -> readFromThisSentence()
 
                     is Gpt -> {
@@ -824,6 +817,15 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             actionModeMenuViewModel.clickedPoint.value,
         )
             .show(supportFragmentManager, "contextMenu")
+    }
+
+    override fun invertColors() {
+        val hasInvertedColor = config.toggleInvertedColor(ebWebView.url.orEmpty())
+        ViewUnit.invertColor(ebWebView, hasInvertedColor)
+    }
+
+    override fun shareLink() {
+        IntentUnit.share(this, ebWebView.title, ebWebView.url)
     }
 
     override fun updateSelectionRect(left: Float, top: Float, right: Float, bottom: Float) {
@@ -1234,7 +1236,9 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 BookmarkEditDialog(
                     this@BrowserActivity,
                     bookmarkViewModel,
-                    Bookmark(nonNullTitle.pruneWebTitle(), currentUrl),
+                    Bookmark(
+                        nonNullTitle.pruneWebTitle(),
+                        currentUrl, order = if (ViewUnit.isWideLayout(this@BrowserActivity)) 999 else 0),
                     {
                         handleBookmarkSync(true)
                         ViewUnit.hideKeyboard(this@BrowserActivity)
@@ -1815,7 +1819,6 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                 addAlbum(getString(R.string.app_name), "", incognito = true)
                 focusOnInput()
             },
-            onHistoryChanged = { },
             splitScreenAction = { url -> toggleSplitScreen(url) },
             addEmptyTabAction = { newATab() }
         )
@@ -2489,6 +2492,8 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
                     }
                 }
             }
+
+            else -> Unit
         }
     }
 

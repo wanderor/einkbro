@@ -64,7 +64,6 @@ function Readability(doc, options) {
   this._disableJSONLD = !!options.disableJSONLD;
   this._allowedVideoRegex = options.allowedVideoRegex || this.REGEXPS.videos;
   this._linkDensityModifier = options.linkDensityModifier || 0;
-  // If true, will always overwrite img src with found data-src attribute.
   this._overwriteImgSrc = !!options.overwriteImgSrc;
 
   // Start with all flags set
@@ -110,10 +109,6 @@ function Readability(doc, options) {
   }
 }
 
-// Helper: OR multiple regexps to one.
-_combineRegExps = (...regexps) =>
-    new RegExp(regexps.map(regexp => regexp.source).join("|"))
-
 Readability.prototype = {
   FLAG_STRIP_UNLIKELYS: 0x1,
   FLAG_WEIGHT_CLASSES: 0x2,
@@ -150,7 +145,7 @@ Readability.prototype = {
     positive:
       /article|body|content|entry|hentry|h-entry|main|page|pagination|post|text|blog|story/i,
     negative:
-      /-ad-|hidden|^hid$| hid$| hid |^hid |banner|combx|comment|com-|contact|foot|footer|footnote|gdpr|masthead|media|meta|outbrain|promo|related|scroll|share|shoutbox|sidebar|skyscraper|sponsor|shopping|tags|widget/i,
+      /-ad-|hidden|^hid$| hid$| hid |^hid |banner|combx|comment|com-|contact|footer|gdpr|masthead|media|meta|outbrain|promo|related|scroll|share|shoutbox|sidebar|skyscraper|sponsor|shopping|tags|widget/i,
     extraneous:
       /print|archive|comment|discuss|e[\-]?mail|share|reply|all|login|sign|single|utility/i,
     byline: /byline|author|dateline|writtenby|p-author/i,
@@ -178,15 +173,6 @@ Readability.prototype = {
       /^(ad(vertising|vertisement)?|pub(licité)?|werb(ung)?|广告|Реклама|Anuncio)$/iu,
     loadingWords:
       /^((loading|正在加载|Загрузка|chargement|cargando)(…|\.\.\.)?)$/iu,
-    // used to identify img data-src attribute:
-    imgSrcset:
-      /\.(jpg|jpeg|png|webp)\s+\d/,
-    imgSrc: _combineRegExps(
-      /^\s*\S+\.(jpg|jpeg|png|webp)\S*\s*$/,
-      /^\s*https?:\/\/\S+=(jpg|jpeg|png|webp)\S*\s*$/),
-    // used to identify lazy img src (aka placeholder)
-    lazyImgSrc:
-      /svg\s+(width|height)=['"]?1(px)?['"]?\s+/
   },
 
   UNLIKELY_ROLES: [
@@ -211,12 +197,11 @@ Readability.prototype = {
     "UL",
   ]),
 
-  ALTER_TO_DIV_EXCEPTIONS: ["DIV", "ARTICLE", "SECTION", "P"],
+  ALTER_TO_DIV_EXCEPTIONS: ["DIV", "ARTICLE", "SECTION", "P", "OL", "UL"],
 
   PRESENTATIONAL_ATTRIBUTES: [
     "align",
     "background",
-    "bgcolor",
     "border",
     "cellpadding",
     "cellspacing",
@@ -448,6 +433,20 @@ Readability.prototype = {
   },
 
   /**
+   * Tests whether a string is a URL or not.
+   *
+   * @param {string} str The string to test
+   * @return {boolean} true if str is a URL, false if not
+   */
+  _isUrl(str) {
+    try {
+      new URL(str);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  /**
    * Converts each <a> and <img> uri in the given element to an absolute URI,
    * ignoring #ref URIs.
    *
@@ -553,10 +552,7 @@ Readability.prototype = {
         ) {
           var child = node.children[0];
           for (var i = 0; i < node.attributes.length; i++) {
-            child.setAttribute(
-              node.attributes[i].name,
-              node.attributes[i].value
-            );
+            child.setAttributeNode(node.attributes[i].cloneNode());
           }
           node.parentNode.replaceChild(child, node);
           node = child;
@@ -770,19 +766,7 @@ Readability.prototype = {
     }
 
     for (var i = 0; i < node.attributes.length; i++) {
-      try {
-        replacement.setAttribute(
-          node.attributes[i].name,
-          node.attributes[i].value
-        );
-      } catch (ex) {
-        /* it's possible for setAttribute() to throw if the attribute name
-         * isn't a valid XML Name. Such attributes can however be parsed from
-         * source in HTML docs, see https://github.com/whatwg/html/issues/4275,
-         * so we can hit them here and then throw. We don't care about such
-         * attributes so we ignore them.
-         */
-      }
+      replacement.setAttributeNode(node.attributes[i].cloneNode());
     }
     return replacement;
   },
@@ -850,14 +834,17 @@ Readability.prototype = {
     this._removeNodes(
       this._getAllNodesWithTag(articleContent, ["p"]),
       function (paragraph) {
-        var imgCount = paragraph.getElementsByTagName("img").length;
-        var embedCount = paragraph.getElementsByTagName("embed").length;
-        var objectCount = paragraph.getElementsByTagName("object").length;
-        // At this point, nasty iframes have been removed, only remain embedded video ones.
-        var iframeCount = paragraph.getElementsByTagName("iframe").length;
-        var totalCount = imgCount + embedCount + objectCount + iframeCount;
-
-        return totalCount === 0 && !this._getInnerText(paragraph, false);
+        // At this point, nasty iframes have been removed; only embedded video
+        // ones remain.
+        var contentElementCount = this._getAllNodesWithTag(paragraph, [
+          "img",
+          "embed",
+          "object",
+          "iframe",
+        ]).length;
+        return (
+          contentElementCount === 0 && !this._getInnerText(paragraph, false)
+        );
       }
     );
 
@@ -953,6 +940,10 @@ Readability.prototype = {
    * (and its kids) are going away, and we want the next node over.
    *
    * Calling this in a loop will traverse the DOM depth-first.
+   *
+   * @param {Element} node
+   * @param {boolean} ignoreSelfAndKids
+   * @return {Element}
    */
   _getNextNode(node, ignoreSelfAndKids) {
     // First check for kids if those aren't being ignored
@@ -993,27 +984,25 @@ Readability.prototype = {
     return 1 - distanceB;
   },
 
-  _checkByline(node, matchString) {
-    if (this._articleByline || this._metadata.byline) {
-      return false;
-    }
+  /**
+   * Checks whether an element node contains a valid byline
+   *
+   * @param node {Element}
+   * @param matchString {string}
+   * @return boolean
+   */
+  _isValidByline(node, matchString) {
+    var rel = node.getAttribute("rel");
+    var itemprop = node.getAttribute("itemprop");
+    var bylineLength = node.textContent.trim().length;
 
-    if (node.getAttribute !== undefined) {
-      var rel = node.getAttribute("rel");
-      var itemprop = node.getAttribute("itemprop");
-    }
-
-    if (
+    return (
       (rel === "author" ||
         (itemprop && itemprop.includes("author")) ||
         this.REGEXPS.byline.test(matchString)) &&
-      this._isValidByline(node.textContent)
-    ) {
-      this._articleByline = node.textContent.trim();
-      return true;
-    }
-
-    return false;
+      !!bylineLength &&
+      bylineLength < 100
+    );
   },
 
   _getNodeAncestors(node, maxDepth) {
@@ -1088,8 +1077,26 @@ Readability.prototype = {
           continue;
         }
 
-        // Check to see if this node is a byline, and remove it if it is.
-        if (this._checkByline(node, matchString)) {
+        // If we don't have a byline yet check to see if this node is a byline; if it is store the byline and remove the node.
+        if (
+          !this._articleByline &&
+          !this._metadata.byline &&
+          this._isValidByline(node, matchString)
+        ) {
+          // Find child node matching [itemprop="name"] and use that if it exists for a more accurate author name byline
+          var endOfSearchMarkerNode = this._getNextNode(node, true);
+          var next = this._getNextNode(node);
+          var itemPropNameNode = null;
+          while (next && next != endOfSearchMarkerNode) {
+            var itemprop = next.getAttribute("itemprop");
+            if (itemprop && itemprop.includes("name")) {
+              itemPropNameNode = next;
+              break;
+            } else {
+              next = this._getNextNode(next);
+            }
+          }
+          this._articleByline = (itemPropNameNode ?? node).textContent.trim();
           node = this._removeAndGetNext(node);
           continue;
         }
@@ -1589,22 +1596,6 @@ Readability.prototype = {
   },
 
   /**
-   * Check whether the input string could be a byline.
-   * This verifies that the input is a string, and that the length
-   * is less than 100 chars.
-   *
-   * @param possibleByline {string} - a string to check whether its a byline.
-   * @return Boolean - whether the input string is a byline.
-   */
-  _isValidByline(byline) {
-    if (typeof byline == "string" || byline instanceof String) {
-      byline = byline.trim();
-      return !!byline.length && byline.length < 100;
-    }
-    return false;
-  },
-
-  /**
    * Converts some of the common HTML entities in string to their corresponding characters.
    *
    * @param str {string} - a string to unescape.
@@ -1654,10 +1645,28 @@ Readability.prototype = {
             ""
           );
           var parsed = JSON.parse(content);
-          if (
-            !parsed["@context"] ||
-            !parsed["@context"].match(/^https?\:\/\/schema\.org\/?$/)
-          ) {
+
+          if (Array.isArray(parsed)) {
+            parsed = parsed.find(it => {
+              return (
+                it["@type"] &&
+                it["@type"].match(this.REGEXPS.jsonLdArticleTypes)
+              );
+            });
+            if (!parsed) {
+              return;
+            }
+          }
+
+          var schemaDotOrgRegex = /^https?\:\/\/schema\.org\/?$/;
+          var matches =
+            (typeof parsed["@context"] === "string" &&
+              parsed["@context"].match(schemaDotOrgRegex)) ||
+            (typeof parsed["@context"] === "object" &&
+              typeof parsed["@context"]["@vocab"] == "string" &&
+              parsed["@context"]["@vocab"].match(schemaDotOrgRegex));
+
+          if (!matches) {
             return;
           }
 
@@ -1805,13 +1814,20 @@ Readability.prototype = {
       metadata.title = this._getArticleTitle();
     }
 
+    const articleAuthor =
+      typeof values["article:author"] === "string" &&
+      !this._isUrl(values["article:author"])
+        ? values["article:author"]
+        : undefined;
+
     // get author
     metadata.byline =
       jsonld.byline ||
       values["dc:creator"] ||
       values["dcterm:creator"] ||
       values.author ||
-      values["parsely-author"];
+      values["parsely-author"] ||
+      articleAuthor;
 
     // get description
     metadata.excerpt =
@@ -2311,91 +2327,87 @@ Readability.prototype = {
     }
   },
 
-  /**
-   * Look for the first data-src like property. If found, convert image/figure
-   * element into image that can be loaded without JS, and return true.
-   * Otherwise return false.
-   */
-  _fixLazyImage(elem, dry_run) {
-    for (var j = 0; j < elem.attributes.length; j++) {
-      attr = elem.attributes[j];
-      if (
-        attr.name === "src" ||
-        attr.name === "srcset" ||
-        attr.name === "alt"
-      ) {
-        continue;
-      }
-      var copyTo = null;
-      if (this.REGEXPS.imgSrcset.test(attr.value)) {
-        copyTo = "srcset";
-      } else if (this.REGEXPS.imgSrc.test(attr.value)) {
-        copyTo = "src";
-      }
-      if (copyTo) {
-        if (!dry_run) {
-          //if this is an img or picture, set the attribute directly
-          if (elem.tagName === "IMG" || elem.tagName === "PICTURE") {
-            elem.setAttribute(copyTo, attr.value);
-          } else if (
-            elem.tagName === "FIGURE" &&
-            !this._getAllNodesWithTag(elem, ["img", "picture"]).length
-          ) {
-            //if the item is a <figure> that does not contain an image or picture, create
-            //one and place it inside the figure see the nytimes-3 testcase for an example
-            var img = this._doc.createElement("img");
-            img.setAttribute(copyTo, attr.value);
-            elem.appendChild(img);
-          }
-        }
-        return true;
-      }
-    }
-    return false;
-  },
-
-  /**
-   * In some sites (e.g. Kotaku, Wechat), they put 1px square image as data uri (base64
-   * or not) in the src attribute. So, here we check if the data uri is too short, width
-   * or hight is 1, just might as well remove it.
-   */
-  _maybeRemoveImgSrc(elem) {
-    if (!elem.src) return;
-
-    var parts = this.REGEXPS.b64DataUrl.exec(elem.src);
-    if (parts != null) {  // base64 encoded
-      // Make sure it's not SVG, because SVG can have a meaningful image in under 133 bytes.
-      if (parts[1] === "image/svg+xml") return;
-      // Here we assume if image is less than 100 bytes (or 133B after encoded to base64)
-      // it will be too small, therefore it might be placeholder image.
-      var b64starts = elem.src.search(/base64\s*/i) + 7;
-      var b64length = elem.src.length - b64starts;
-      if (b64length >= 133) return;
-    } else {  // not base64 encoded
-      if (!this.REGEXPS.lazyImgSrc.test(elem.src)) return;
-    }
-
-    if (this._fixLazyImage(elem, true)) {  // src could be removed
-      elem.removeAttribute("src");
-    }
-  },
-
   /* convert images and figures that have properties like data-src into images that can be loaded without JS */
   _fixLazyImages(root) {
     this._forEachNode(
       this._getAllNodesWithTag(root, ["img", "picture", "figure"]),
       function (elem) {
-        if (!this._overwriteImgSrc) {  // overwrite is conditional, not forced
-          this._maybeRemoveImgSrc(elem);
-          // also check for "null" to work around https://github.com/jsdom/jsdom/issues/2580
-          if (
-            (elem.src || (elem.srcset && elem.srcset != "null")) &&
-            !elem.className.toLowerCase().includes("lazy")
-          ) {
+        // In some sites (e.g. Kotaku), they put 1px square image as base64 data uri in the src attribute.
+        // So, here we check if the data uri is too short, just might as well remove it.
+        if (elem.src && this.REGEXPS.b64DataUrl.test(elem.src)) {
+          // Make sure it's not SVG, because SVG can have a meaningful image in under 133 bytes.
+          var parts = this.REGEXPS.b64DataUrl.exec(elem.src);
+          if (parts[1] === "image/svg+xml") {
             return;
           }
+
+          // Make sure this element has other attributes which contains image.
+          // If it doesn't, then this src is important and shouldn't be removed.
+          var srcCouldBeRemoved = false;
+          for (var i = 0; i < elem.attributes.length; i++) {
+            var attr = elem.attributes[i];
+            if (attr.name === "src") {
+              continue;
+            }
+
+            if (/\.(jpg|jpeg|png|webp)/i.test(attr.value)) {
+              srcCouldBeRemoved = true;
+              break;
+            }
+          }
+
+          // Here we assume if image is less than 100 bytes (or 133 after encoded to base64)
+          // it will be too small, therefore it might be placeholder image.
+          if (srcCouldBeRemoved) {
+            var b64starts = parts[0].length;
+            var b64length = elem.src.length - b64starts;
+            if (b64length < 133) {
+              elem.removeAttribute("src");
+            }
+          }
         }
-        this._fixLazyImage(elem, false);
+
+        // also check for "null" to work around https://github.com/jsdom/jsdom/issues/2580
+        if (
+          (elem.src || (elem.srcset && elem.srcset != "null")) &&
+          !elem.className.toLowerCase().includes("lazy") &&
+          !this._overwriteImgSrc
+        ) {
+          return;
+        }
+
+        for (var j = 0; j < elem.attributes.length; j++) {
+          attr = elem.attributes[j];
+          if (
+            attr.name === "src" ||
+            attr.name === "srcset" ||
+            attr.name === "alt"
+          ) {
+            continue;
+          }
+          var copyTo = null;
+          if (/\.(jpg|jpeg|png|webp)\s+\d/.test(attr.value)) {
+            copyTo = "srcset";
+          } else if (/^\s*\S+\.(jpg|jpeg|png|webp)\S*\s*$/.test(attr.value) ||
+                     /^\s*https?:\/\/\S+=(jpg|jpeg|png|webp)\S*\s*$/.test(attr.value)) {
+            copyTo = "src";
+          }
+          if (copyTo) {
+            //if this is an img or picture, set the attribute directly
+            if (elem.tagName === "IMG" || elem.tagName === "PICTURE") {
+              elem.setAttribute(copyTo, attr.value);
+            } else if (
+              elem.tagName === "FIGURE" &&
+              !this._getAllNodesWithTag(elem, ["img", "picture"]).length
+            ) {
+              //if the item is a <figure> that does not contain an image or picture, create one and place it inside the figure
+              //see the nytimes-3 testcase for an example
+              var img = this._doc.createElement("img");
+              img.setAttribute(copyTo, attr.value);
+              elem.appendChild(img);
+            }
+          }
+        }
       }
     );
   },
@@ -2863,6 +2875,29 @@ function  getReadingSpeedForLanguage(lang) {
  return readingSpeed.get(lang) || readingSpeed.get("en");
 }
 
+const minuteTranslations = {
+  en: 'minutes',
+  ar: 'دقائق',
+  de: 'Minuten',
+  es: 'minutos',
+  fi: 'minuuttia',
+  fr: 'minutes',
+  he: 'דקות',
+  it: 'minuti',
+  jw: 'menit',
+  nl: 'minuten',
+  pl: 'minut',
+  pt: 'minutos',
+  ru: 'минут',
+  sk: 'minút',
+  sv: 'minuter',
+  tr: 'dakika',
+  zh: '分鐘',
+  ja: '分',
+  ko: '분',
+};
+
+
 function  getReadingTime(length, lang = "en") {
   const readingSpeed = this.getReadingSpeedForLanguage(lang);
   const charactersPerMinuteLow = readingSpeed.cpm - readingSpeed.variance;
@@ -2873,8 +2908,11 @@ function  getReadingTime(length, lang = "en") {
   // Construct a localized and "humanized" reading time in minutes.
   // If we have both a fast and slow reading time we'll show both e.g.
   // "2 - 4 minutes", otherwise we'll just show "4 minutes".
+  console.log('lang', lang);
+  console.log('minuteTranslations[lang]', minuteTranslations[lang]);
   try {
     var parts = new Intl.RelativeTimeFormat(lang).formatToParts(readingTimeMinsSlow, 'minute');
+    console.log('parts', parts);
     if (parts.length == 3) {
       // No need to use part[0] which represents the literal "in".
       var readingTime = parts[1].value; // reading time in minutes
@@ -2884,6 +2922,8 @@ function  getReadingTime(length, lang = "en") {
         readingTimeString = `${readingTimeMinsFast} - ${readingTimeString}`;
       }
       return readingTimeString;
+    } else {
+      return `${readingTimeMinsSlow} ${minuteTranslations[lang]}`;
     }
   }
   catch(error) {
@@ -2891,4 +2931,11 @@ function  getReadingTime(length, lang = "en") {
   }
 
   return "";
+}
+
+function setPadding(paddingValue) {
+    var elements = document.getElementsByClassName('mozac-readerview-body');
+    for (var i = 0; i < elements.length; i++) {
+        elements[i].style.padding = paddingValue + 'px';
+    }
 }

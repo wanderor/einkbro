@@ -55,6 +55,7 @@ import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 
@@ -97,7 +98,7 @@ open class EBWebView(
     var incognito: Boolean = false
         set(value) {
             field = value
-            toggleCookieSupport(!incognito)
+            toggleCookieSupport(!value)
         }
 
     private var isForeground = false
@@ -121,7 +122,7 @@ open class EBWebView(
         val cssStyle =
             (if (config.blackFontStyle) makeTextBlackCss else "") +
                     (if (fontType == FontType.GOOGLE_SERIF) notoSansSerifFontCss else "") +
-                    (if (fontType == FontType.TC_WENKAI) wenKaiFontCss else "") +
+                    (if (fontType == FontType.TC_IANSUI) iansuiFontCss else "") +
                     (if (fontType == FontType.JA_MINCHO) jaMinchoFontCss else "") +
                     (if (fontType == FontType.KO_GAMJA) koGamjaFontCss else "") +
                     (if (fontType == FontType.SERIF) serifFontCss else "") +
@@ -507,12 +508,18 @@ open class EBWebView(
     }
 
     fun isAtTop(): Boolean = if (isVerticalRead) {
-        scrollX == 0
+        val totalPageCount = computeHorizontalScrollRange() / shiftOffset()
+        val currentPage = totalPageCount - (floor(scrollX.toDouble() / shiftOffset()).toInt())
+        currentPage == 1
     } else {
         scrollY == 0
     }
 
-    fun jumpToTop() = scrollTo(0, 0)
+    fun jumpToTop() = if (isVerticalRead) {
+        scrollTo(computeHorizontalScrollRange() - shiftOffset(), 0)
+    } else {
+        scrollTo(0, 0)
+    }
 
     fun jumpToBottom() = if (isVerticalRead) {
         scrollTo(computeHorizontalScrollRange() - shiftOffset(), 0)
@@ -645,10 +652,15 @@ open class EBWebView(
 
     fun updatePageInfo() {
         try {
-            val info = if (isVerticalRead) {
-                "${ceil((scrollX + 1).toDouble() / shiftOffset()).toInt()}/${computeHorizontalScrollRange() / shiftOffset()}"
+            val totalPageCount = if (isVerticalRead) {
+                computeHorizontalScrollRange() / shiftOffset()
             } else {
-                "${ceil((scrollY + 1).toDouble() / shiftOffset()).toInt()}/${computeVerticalScrollRange() / shiftOffset()}"
+                computeVerticalScrollRange() / shiftOffset()
+            }
+            val info = if (isVerticalRead) {
+                "${totalPageCount - (floor(scrollX.toDouble() / shiftOffset()).toInt())}/$totalPageCount"
+            } else {
+                "${ceil((scrollY + 1).toDouble() / shiftOffset()).toInt()}/$totalPageCount"
             }
             browserController?.updatePageInfo(if (info != "0/0") info else "-/-")
         } catch (e: ArithmeticException) { // prevent divide by zero
@@ -746,22 +758,25 @@ open class EBWebView(
     var isReaderModeOn = false
     fun toggleReaderMode(
         isVertical: Boolean = false,
-        getRawTextAction: ((String) -> Unit)? = null,
     ) {
         isReaderModeOn = !isReaderModeOn
         if (isReaderModeOn) {
             evaluateMozReaderModeJs(isVertical) {
-                val getRawTextJs =
-                    if (getRawTextAction != null) " return document.getElementsByTagName('html')[0].innerText; " else ""
                 evaluateJavascript(
                     "(function() { ${
-                        String.format(
-                            replaceWithReaderModeBodyJs,
-                            url
-                        )
-                    } $getRawTextJs })();",
-                    getRawTextAction
-                )
+                        String.format(replaceWithReaderModeBodyJs, url)
+                    } })();"
+                ) { _ ->
+                    if (isVertical) {
+                        evaluateJsFile("process_text_nodes.js", false) {
+                            // need to wait for a while to jump to top, so that vertical read starts from beginning
+                            postDelayed({ jumpToTop() }, 200)
+                        }
+                    } else {
+                        // add padding
+                        setPaddingInReaderMode(config.paddingForReaderMode)
+                    }
+                }
             }
             settings.textZoom = config.readerFontSize
             updateCssStyle()
@@ -769,6 +784,10 @@ open class EBWebView(
             disableReaderMode(isVertical)
             settings.textZoom = config.fontSize
         }
+    }
+
+    private fun setPaddingInReaderMode(padding: Int) {
+        evaluateJavascript("javascript:setPadding($padding)", null)
     }
 
     fun clearTranslationElements() {
@@ -1095,7 +1114,7 @@ open class EBWebView(
             var article = new Readability(documentClone, $readabilityOptions).parse();
             document.innerHTMLCache = document.body.innerHTML;
 
-            article.readingTime = getReadingTime(article.length, document.lang);
+            article.readingTime = getReadingTime(article.length, document.documentElement.lang.substring(0, 2));
 
             document.body.outerHTML = createHtmlBody(article)
 
@@ -1106,7 +1125,7 @@ open class EBWebView(
             javascript:(function() {
                 var documentClone = document.cloneNode(true);
                 var article = new Readability(documentClone, $readabilityOptions).parse();
-                article.readingTime = getReadingTime(article.length, document.lang);
+                article.readingTime = getReadingTime(article.length, document.documentElement.lang.substring(0, 2));
                 var bodyOuterHTML = createHtmlBodyWithUrl(article, "%s")
                 var headOuterHTML = document.head.outerHTML;
                 return ('<html>'+ headOuterHTML + bodyOuterHTML +'</html>');
@@ -1123,6 +1142,11 @@ open class EBWebView(
         private const val verticalLayoutCss = "body {\n" +
                 "-webkit-writing-mode: vertical-rl;\n" +
                 "writing-mode: vertical-rl;\n" +
+                "}\n" +
+                "img {\n" +
+                "margin: 10px 10px 10px 10px;\n" +
+                "float: left;\n" +
+                "display: block;\n" +
                 "}\n"
 
         private const val horizontalLayoutCss = "body {\n" +
@@ -1138,10 +1162,10 @@ open class EBWebView(
                     "* {\n" +
                     "font-family: 'Noto Serif TC', 'Noto Serif JP', 'Noto Serif KR', 'Noto Serif SC', serif !important;\n" +
                     "}\n"
-        private const val wenKaiFontCss =
-            "@import url('https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400&display=swap');" +
+        private const val iansuiFontCss =
+            "@import url('https://fonts.googleapis.com/css2?family=BIZ+UDPMincho&family=Iansui&display=swap');" +
                     "* {\n" +
-                    "font-family: 'LXGW WenKai TC',serif !important;\n" +
+                    "font-family: 'Iansui',serif !important;\n" +
                     "}\n"
         private const val jaMinchoFontCss =
             "@import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400&display=swap');" +

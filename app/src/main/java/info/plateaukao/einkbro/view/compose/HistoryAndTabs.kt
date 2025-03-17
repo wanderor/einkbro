@@ -5,6 +5,7 @@ package info.plateaukao.einkbro.view.compose
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Point
 import android.util.AttributeSet
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -83,7 +84,7 @@ class HistoryAndTabsView @JvmOverloads constructor(
     var recordList: List<Record> by mutableStateOf(emptyList())
     var onHistoryIconClick by mutableStateOf({})
     var onHistoryItemClick by mutableStateOf<(Record) -> Unit>({})
-    var onHistoryItemLongClick by mutableStateOf<(Record) -> Unit>({})
+    var onHistoryItemLongClick by mutableStateOf<(Record, Point) -> Unit>({ _, _ -> })
 
     var addIncognitoTab by mutableStateOf({})
     var addTab by mutableStateOf({})
@@ -137,7 +138,7 @@ fun HistoryAndTabs(
     records: List<Record>,
     onHistoryIconClick: () -> Unit,
     onHistoryItemClick: (Record) -> Unit,
-    onHistoryItemLongClick: (Record) -> Unit,
+    onHistoryItemLongClick: (Record, Point) -> Unit,
 
     addIncognitoTab: () -> Unit,
     addTab: () -> Unit,
@@ -174,7 +175,12 @@ fun HistoryAndTabs(
         MainContent(
             modifier = Modifier.Companion
                 .weight(1f, false)
-                .background(MaterialTheme.colors.background),
+                .background(MaterialTheme.colors.background)
+                .horizontalBorder(
+                    drawTop = !isBarOnTop,
+                    drawBottom = isBarOnTop,
+                    MaterialTheme.colors.onBackground
+                ),
             isHistoryOpen,
             shouldShowTwoColumns,
             shouldReverseHistory,
@@ -217,7 +223,7 @@ private fun MainContent(
     bookmarkManager: BookmarkManager?,
     records: List<Record>,
     onHistoryItemClick: (Record) -> Unit,
-    onHistoryItemLongClick: (Record) -> Unit
+    onHistoryItemLongClick: (Record, Point) -> Unit,
 ) {
     if (!isHistoryOpen) {
         PreviewTabs(
@@ -254,7 +260,7 @@ fun PreviewTabs(
     albumFocusIndex: MutableState<Int>,
     onClick: (Album) -> Unit,
     closeAction: (Album) -> Unit,
-    showHorizontal: Boolean = false
+    showHorizontal: Boolean = false,
 ) {
     if (showHorizontal) {
         val maxItemWidth = 200
@@ -324,7 +330,7 @@ fun PreviewTabs(
 @Composable
 private fun scrollToFocusedItem(
     listState: LazyListState,
-    albumFocusIndex: Int
+    albumFocusIndex: Int,
 ) {
     val scope = rememberCoroutineScope()
     LaunchedEffect(true) {
@@ -406,7 +412,7 @@ data class TabInfo(
     val url: String,
     val title: String,
     val favicon: Bitmap? = null,
-    val isTranslatePage: Boolean
+    val isTranslatePage: Boolean,
 )
 
 @Composable
@@ -507,7 +513,7 @@ fun PreviewHistoryAndTabs() {
         records = recordList,
         onHistoryIconClick = {},
         onHistoryItemClick = {},
-        onHistoryItemLongClick = {},
+        onHistoryItemLongClick = { _, _ -> },
 
         addIncognitoTab = {},
         addTab = {},
