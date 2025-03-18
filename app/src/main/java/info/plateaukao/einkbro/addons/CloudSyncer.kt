@@ -173,7 +173,7 @@ class CloudSyncer(
     fun onPageRemoved() = scheduleForceSync()
 
     fun onPageScrolled() {
-        if (hasForceSync()) scheduleForceSync()  // postpone
+        if (forceSyncTime.get() < Long.MAX_VALUE) scheduleForceSync()  // postpone
     }
 
     fun handleUri(url: String): Boolean {
@@ -258,7 +258,7 @@ class CloudSyncer(
         if (shortcut) {  // shortcut path
             // Note: theoretically we shouldn't call size() here in timer thread
             backfilling = (browserContainer.size() < config.slots * .7 && waitingUrls.isNotEmpty())
-            caching = (urlsToCache.isNotEmpty() && !offline && !hasForceSync())
+            caching = (urlsToCache.isNotEmpty() && !offline && !willForceSyncSoon())
         } else {  // full path
             lastSyncTime = now  // update even if action fails
             // Note: prevent infinite memory growth.
@@ -490,7 +490,7 @@ class CloudSyncer(
         val urls = urlsToCache.take(config.slots)
         val attempted = mutableSetOf<String>()
         helper.runAndWait(period = config.wait * 1_000L, max = urls.size,
-                          skip = { hasForceSync() }) { index ->
+                          skip = { willForceSyncSoon() }) { index ->
             val url = urls[index]
             synchronized(attempted) {
                 attempted.add(url)
@@ -572,7 +572,7 @@ class CloudSyncer(
 
         // Preload prepared candidates.
         helper.runAndWait(period = config.wait * 1_000L, max = candidates.size,
-                          skip = { !offline && hasForceSync() }) { index ->
+                          skip = { !offline && willForceSyncSoon() }) { index ->
             val (webView, url) = candidates[index]
             if (!isLoaded(webView) && webView.initAlbumUrl == url) {
                 preloadUrl(webView, url, offline)
@@ -683,7 +683,7 @@ class CloudSyncer(
         }
     }
 
-    private fun hasForceSync() = forceSyncTime.get() < Long.MAX_VALUE
+    private fun willForceSyncSoon() = forceSyncTime.get() < Date().time + config.wait * 1_000L
 
     private fun scheduleForceSync() {
         forceSyncTime.set(Date().time + config.forceSync * 1_000L)
