@@ -372,6 +372,13 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             registerReceiver(downloadReceiver, IntentFilter(ACTION_DOWNLOAD_COMPLETE))
         }
 
+        cloudSyncer = BaiduSyncer.create(this, mainContentLayout, activityResultRegistry,
+            browserContainer, this) { urls ->
+            urls.forEach {
+                addAlbum(url = it, foreground = false)
+            }
+        }
+
         dispatchIntent(intent)
         // after dispatching intent, the value should be reset to false
         shouldLoadTabState = false
@@ -393,13 +400,6 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
 
         handleWindowInsets()
         listenKeyboardShowHide()
-
-        cloudSyncer = BaiduSyncer.create(this, mainContentLayout, activityResultRegistry,
-                                         browserContainer, this) { urls ->
-            urls.forEach {
-                addAlbum(url = it, foreground = false)
-            }
-        }
 
         // post delay to update filter list
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -1930,8 +1930,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
             this.albumTitle = title
             this.incognito = incognito
             setOnTouchListener(createMultiTouchTouchListener(this))
-            setOnPageFinishedAction { cloudSyncer.onPageFinished(this) }
-            setHandleUriAction {url -> cloudSyncer.handleUri(url)}
+            cloudSyncer.prepareWebView(this)
         }
 
         maybeCreateNewPreloadWebView(enablePreloadWebView, newWebView)

@@ -55,6 +55,9 @@ class CloudSyncer(
         // Maximal number of recently worked URLs to temporarily keep.
         private const val MAX_RECENTLY_WORKED_URLS: Int = 1_000
 
+        // Size of vertical scroll bar, or 0 for auto
+        private const val VERTICAL_SCROLL_BAR_SIZE: Int = 16
+
         // Normalizes the URL of an album controller for dedup.
         fun normalizeUrl(controller: AlbumController): String {
             var url = controller.albumUrl
@@ -148,7 +151,31 @@ class CloudSyncer(
         var urlsToClose: Set<String> = setOf()
     )
 
-    fun onPageFinished(webView: EBWebView) {
+    fun onPageRemoved() = scheduleForceSync()
+
+    fun onPageScrolled() {
+        if (forceSyncTime.get() < Long.MAX_VALUE) scheduleForceSync()  // postpone
+    }
+
+    fun prepareWebView(webView: EBWebView) {
+        webView.setOnPageFinishedAction { onPageFinished(webView) }
+        webView.setHandleUriAction {url -> handleUri(url)}
+        if (VERTICAL_SCROLL_BAR_SIZE > 0) {  // customize scroll bar
+            webView.isScrollbarFadingEnabled = false
+            webView.scrollBarSize = VERTICAL_SCROLL_BAR_SIZE
+        }
+    }
+
+    init {
+        helper.log("Initializing CloudSyncer")
+        configLoader = ConfigLoader(name, CloudSyncerConfig.serializer(),
+            context, registry) { config, _ ->
+            applyConfig(config)
+            start()
+        }
+    }
+
+    private fun onPageFinished(webView: EBWebView) {
         if (webView.albumUrl.startsWith("http") &&
             prevUrls.isNotEmpty() && webView.albumUrl !in prevUrls) {
             scheduleForceSync()
@@ -170,27 +197,12 @@ class CloudSyncer(
         }, 2_000)
     }
 
-    fun onPageRemoved() = scheduleForceSync()
-
-    fun onPageScrolled() {
-        if (forceSyncTime.get() < Long.MAX_VALUE) scheduleForceSync()  // postpone
-    }
-
-    fun handleUri(url: String): Boolean {
+    private fun handleUri(url: String): Boolean {
         if (skipperUrlRegex.matches(url)) {
             helper.log(Log.DEBUG, "Skipping URL: $url")
             return true
         }
         return false
-    }
-
-    init {
-        helper.log("Initializing CloudSyncer")
-        configLoader = ConfigLoader(name, CloudSyncerConfig.serializer(),
-            context, registry) { config, _ ->
-            applyConfig(config)
-            start()
-        }
     }
 
     private fun applyConfig(config: CloudSyncerConfig) {
