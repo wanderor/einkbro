@@ -54,7 +54,8 @@ class CloudSyncer(
 
         // Maximal number of recently worked URLs to temporarily keep.
         private const val MAX_RECENTLY_WORKED_URLS: Int = 1_000
-
+        // Maximal number of URLs to attempt to cache in each round.
+        private const val MAX_CACHE_ATTAMPTS: Int = 5
         // Size of vertical scroll bar, or 0 for auto
         private const val VERTICAL_SCROLL_BAR_SIZE: Int = 16
 
@@ -81,10 +82,10 @@ class CloudSyncer(
         // Checks whether a WebView instance is indeed loaded.
         private fun isLoaded(webView: EBWebView): Boolean {
             // TODO: add i18n support
-            return webView.album.isLoaded && webView.albumTitle.isNotBlank() &&
+            return (webView.album.isLoaded && webView.albumTitle.isNotBlank() &&
                     webView.albumTitle != "..." &&
                     webView.albumTitle != "Webpage not available" &&
-                    webView.albumTitle != "网页无法打开"
+                    webView.albumTitle != "网页无法打开")
         }
     }
 
@@ -499,7 +500,7 @@ class CloudSyncer(
 
         // Note: each time we only attempt to cache a few URLs, so that the total time spent and
         // the risk of interruption is acceptable.
-        val urls = urlsToCache.take(config.slots)
+        val urls = urlsToCache.take(MAX_CACHE_ATTAMPTS)
         val attempted = mutableSetOf<String>()
         helper.runAndWait(period = config.wait * 1_000L, max = urls.size,
                           skip = { willForceSyncSoon() }) { index ->
