@@ -25,6 +25,9 @@ class AddOnHelper(
         // For debugging release version.
         // Whether to always turn on logging to external file.
         private const val ALWAYS_EXTERNAL_LOGGING: Boolean = false
+
+        // Directory in Android device to write external log.
+        private const val EXTERNAL_LOG_DIR: String = "/storage/emulated/0/Download"
     }
 
     var externalLogging: Boolean = false
@@ -124,11 +127,9 @@ class AddOnHelper(
 
         // For debugging release version.
         if (externalLogFile == null && (externalLogging || ALWAYS_EXTERNAL_LOGGING)) {
-            context.getExternalFilesDir(null)?.let {
-                val path = "${it.absolutePath}/$name.log"
-                externalLogFile = File(path)
-                Log.i(tag, "Opened external log file at $path")
-            }
+            val path = "$EXTERNAL_LOG_DIR/$name.log"
+            externalLogFile = File(path)
+            Log.i(tag, "Opened external log file at $path")
         }
         externalLogFile?.let {
             val timestamp = logDateFormat.format(Date())
