@@ -12,6 +12,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.concurrent.atomic.AtomicLong
@@ -71,12 +72,35 @@ class CloudSyncer(
 
         // Normalizes a URL for dedup.
         fun normalizeUrl(url: String): String {
-            // Removes hash.
-            val pos = url.indexOf('#')
-            if (pos > 0) {
-                return url.substring(0, pos)
+            return try {
+                val uri = URI.create(url)
+
+                val paramsToKeep = if (uri.host == "mp.weixin.qq.com") {
+                    setOf("__biz", "mid", "idx", "sn")
+                } else {
+                    null
+                }
+
+                // Filter query params.
+                val filteredParams = if (paramsToKeep == null) uri.query else
+                    uri.query.split("&")
+                        .map { it.split("=", limit = 2) }
+                        .filter { it.isNotEmpty() && paramsToKeep.contains(it[0]) }
+                        .sortedBy { it[0] }
+                        .joinToString("&") {
+                            it[0] + if (it.size > 1) "=" + it[1] else ""
+                        }
+
+                URI(
+                    uri.scheme,
+                    uri.authority,
+                    uri.path,
+                    filteredParams.ifEmpty { null },
+                    uri.fragment
+                ).toString()
+            } catch (e: Exception) {
+                url  // failed to parse URL
             }
-            return url
         }
 
         // Checks whether a WebView instance is indeed loaded.
@@ -254,7 +278,7 @@ class CloudSyncer(
         }
 
         // Decides actions to take.
-        val now = Date().time
+        val now = System.currentTimeMillis()
         var shortcut = true
         if (!offline) {
             val cur = forceSyncTime.get()
@@ -292,22 +316,31 @@ class CloudSyncer(
 
     // Loads state.
     private fun loadState() {
-        sharedPreferences.getString("waitingUrls", null)?.let {
-            waitingUrls = Json.decodeFromString(it)
+        sharedPreferences.getString("waitingUrls", null)?.let { str ->
+            waitingUrls = Json.decodeFromString(str)
+            waitingUrls = waitingUrls.map { normalizeUrl(it) }.toSet().toList()
         }
-        sharedPreferences.getString("recentUrls", null)?.let {
-            recentUrls = Json.decodeFromString(it)
+        sharedPreferences.getString("recentUrls", null)?.let { str ->
+            recentUrls = Json.decodeFromString(str)
         }
-        sharedPreferences.getString("cachedUrls", null)?.let {
-            cachedUrls = Json.decodeFromString(it)
+        sharedPreferences.getString("cachedUrls", null)?.let { str ->
+            cachedUrls = Json.decodeFromString(str)
         }
         nextCachedUrlId = sharedPreferences.getLong("nextCachedUrlId", 0)
         helper.log("Loaded: ${waitingUrls.size} waiting, ${recentUrls.size} recent, ${cachedUrls.size} cached")
+
+        val lastSavedTime = sharedPreferences.getLong("lastSavedTime", 0)
+        if (lastSavedTime > 0 && System.currentTimeMillis() - lastSavedTime > config.lifetime * 1_000L) {
+            waitingUrls = listOf()
+            recentUrls.clear()
+            helper.log("Dropped obsolete state")
+        }
     }
 
     // Persists state.
     private fun saveState() {
         val editor = sharedPreferences.edit()
+        editor.putLong("lastSavedTime", System.currentTimeMillis())
         editor.putString("waitingUrls", Json.encodeToString(waitingUrls))
         editor.putString("recentUrls", Json.encodeToString(recentUrls))
         editor.putString("cachedUrls", Json.encodeToString(cachedUrls))
@@ -336,7 +369,8 @@ class CloudSyncer(
         val merger = Merger(curUrls = openUrls union waitingUrls)
         if (config.receiving && !shortcut) {
             if (mergeFromCloud(merger)) {
-                merger.closedUrlsInCloud.forEach { (url, timestamp) ->
+                merger.closedUrlsInCloud.forEach { (cloudUrl, timestamp) ->
+                    val url = normalizeUrl(cloudUrl)
                     val old = recentUrls.getOrDefault(url, 0)
                     if (timestamp > old) recentUrls[url] = timestamp
                 }
@@ -419,13 +453,14 @@ class CloudSyncer(
 
         agent.readFromCloud()?.let { bytes ->
             val state: BrowserState = CloudSyncerAgent.decodeJson(bytes)
-            helper.log("Received state from '${state.name}': open=${state.urls.size} closed=${state.closed.size} [time: '${state.timestamp}']")
+            helper.log("Received state from '${state.name}': open=${state.urls.size} " +
+                       "closed=${state.closed.size} [time: '${state.timestamp}']")
             if (state.version == "1.0.0") {
                 if (state.timestamp > lastUpdateTime) {
                     merger.cloudSource = state.name
-                    merger.urlsInCloud = state.urls
+                    merger.urlsInCloud = state.urls.map { normalizeUrl(it) }.toSet()
                     merger.closedUrlsInCloud = state.closed
-                    merger.urlsToOpen = (state.urls subtract merger.curUrls).filter { url ->
+                    merger.urlsToOpen = (merger.urlsInCloud subtract merger.curUrls).filter { url ->
                         !recentUrls.contains(url)
                     }.toSet()
                     merger.urlsToClose = state.closed.keys intersect merger.curUrls
@@ -685,10 +720,11 @@ class CloudSyncer(
 
     // Closes the specified URLs in the local browser.
     private fun closeUrls(urls: Iterable<String>) {
+        val normalizedUrls = urls.map { normalizeUrl(it) }.toSet()
         helper.handler.post {
             val controllers: Set<AlbumController> = browserContainer.list()
                 .filter { !it.isTranslatePage }
-                .filter { urls.contains(normalizeUrl(it)) }
+                .filter { normalizedUrls.contains(normalizeUrl(it)) }
                 .toSet()
             controllers.forEach {
                 browserController.removeAlbum(it, false)
@@ -696,9 +732,9 @@ class CloudSyncer(
         }
     }
 
-    private fun willForceSyncSoon() = forceSyncTime.get() < Date().time + config.wait * 1_000L
+    private fun willForceSyncSoon() = forceSyncTime.get() < System.currentTimeMillis() + config.wait * 1_000L
 
     private fun scheduleForceSync() {
-        forceSyncTime.set(Date().time + config.forceSync * 1_000L)
+        forceSyncTime.set(System.currentTimeMillis() + config.forceSync * 1_000L)
     }
 }

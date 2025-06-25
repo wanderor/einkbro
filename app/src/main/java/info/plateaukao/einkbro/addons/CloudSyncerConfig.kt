@@ -32,7 +32,7 @@ data class CloudSyncerConfig(
     val forceSync: Int = 180,
     // Maximal number of recently closed URLs to be cached.
     val recents: Int = 200,
-    // Maximal duration in seconds for a URL to stay in cache.
+    // Maximal duration in seconds for a URL to stay in cache or queue.
     val lifetime: Int = 7 * 86400,  // 7 days
     // Interval between heartbeats in seconds.
     val heartbeat: Int = 30,
