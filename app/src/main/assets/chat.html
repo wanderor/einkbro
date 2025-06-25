@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat with Web</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            max-width: 800px;
+            margin: 0 auto;
+            width: 100%;
+            height: 100%;
+            min-height: 100vh;
+            background-color: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            padding-bottom: 70px; /* Space for input area */
+        }
+        .message {
+            margin-bottom: 16px;
+            padding: 10px 14px;
+            border-radius: 18px;
+            word-wrap: break-word;
+        }
+        .user-message {
+            background-color: transparent;
+            border: 2px solid #cccccc;
+            align-self: flex-end;
+            margin-left: auto;
+            margin-right: 0;
+            text-align: right;
+            min-width: 30%;
+            max-width: 80%;
+        }
+        .bot-message {
+            background-color: transparent;
+            border: 1px solid #cccccc;
+            align-self: flex-start;
+            max-width: 100%;
+        }
+        .input-area {
+            display: flex;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-top: 1px solid #ddd;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+        }
+        #message-input {
+            flex: 1;
+            min-width: 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            outline: none;
+        }
+        #send-button {
+            flex-shrink: 0;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 44px;
+            height: 44px;
+            margin-left: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #history-button {
+            flex-shrink: 0;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 44px;
+            height: 44px;
+            margin-left: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #send-button:active, #history-button:active {
+            opacity: 0.8;
+        }
+        /* Icons styling */
+        .icon {
+            width: 24px;
+            height: 24px;
+            fill: white;
+        }
+        pre {
+            background-color: #f8f8f8;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        code {
+            font-family: monospace;
+            background-color: #f0f0f0;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        blockquote {
+            border-left: 4px solid #ddd;
+            padding-left: 10px;
+            color: #666;
+            margin-left: 0;
+        }
+        .typing-indicator {
+            display: none;
+            padding: 10px;
+            background-color: #f1f1f1;
+            border-radius: 18px;
+            margin-bottom: 16px;
+            position: fixed;
+            bottom: 60px;
+            left: 16px;
+            z-index: 10;
+        }
+        .typing-indicator span {
+            height: 8px;
+            width: 8px;
+            background-color: #888;
+            border-radius: 50%;
+            display: inline-block;
+            margin: 0 1px;
+            animation: bounce 1.2s infinite ease-in-out;
+        }
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        @keyframes bounce {
+            0%, 80%, 100% { transform: translateY(0); }
+            40% { transform: translateY(-6px); }
+        }
+        table {
+          border-collapse: collapse;
+          border: 1px solid #cccccc;
+        }
+        th, td {
+          border: 1px solid #cccccc;
+        }
+        del {
+            text-decoration: none !important;  /* Remove strikethrough and make it important */
+        }
+        /* History popup styles */
+        .history-popup {
+            display: none;
+            position: fixed;
+            bottom: 70px;
+            right: 10px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            max-width: 80%;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+        }
+        .history-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .history-item {
+            padding: 10px 15px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+        .history-item:hover {
+            background-color: #f5f5f5;
+        }
+        .history-item:last-child {
+            border-bottom: none;
+        }
+        .popup-header {
+            padding: 10px 15px;
+            background-color: #f0f0f0;
+            border-bottom: 1px solid #ddd;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+        }
+        .close-popup {
+            cursor: pointer;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+<div class="chat-container">
+    <div class="chat-messages" id="chat-messages">
+    </div>
+    <div class="typing-indicator" id="typing-indicator">
+        <span></span>
+        <span></span>
+        <span></span>
+    </div>
+    <div class="input-area">
+        <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
+        <button id="history-button">
+            <svg class="icon" viewBox="0 0 24 24">
+                <path d="M12,2C6.5,2,2,6.5,2,12s4.5,10,10,10s10-4.5,10-10S17.5,2,12,2z M12,20c-4.4,0-8-3.6-8-8s3.6-8,8-8s8,3.6,8,8 S16.4,20,12,20z M12.5,7H11v6l5.2,3.2l0.8-1.3l-4.5-2.7V7z"/>
+            </svg>
+        </button>
+        <button id="send-button">
+            <svg class="icon" viewBox="0 0 24 24">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            </svg>
+        </button>
+    </div>
+</div>
+
+<!-- History popup -->
+<div class="history-popup" id="history-popup">
+    <div class="popup-header">
+        <span>Message History</span>
+        <span class="close-popup" id="close-popup">&times;</span>
+    </div>
+    <ul class="history-list" id="history-list">
+        <!-- History items will be inserted here -->
+    </ul>
+</div>
+
+<!-- Include marked.js for Markdown parsing -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.0.2/marked.min.js"></script>
+
+<script>
+    // Global variables
+    const chatMessages = document.getElementById('chat-messages');
+    const messageInput = document.getElementById('message-input');
+    const sendButton = document.getElementById('send-button');
+    const typingIndicator = document.getElementById('typing-indicator');
+    const historyButton = document.getElementById('history-button');
+    const historyPopup = document.getElementById('history-popup');
+    const historyList = document.getElementById('history-list');
+    const closePopup = document.getElementById('close-popup');
+
+    // Track current message element for streaming
+    let currentStreamMessageElement = null;
+    let isStreaming = false;
+
+    // Message history management
+    const MESSAGE_HISTORY_KEY = 'chatMessageHistory';
+    const MAX_HISTORY_ITEMS = 10;
+
+    // Initialize message history from localStorage
+    let messageHistory = [];
+    try {
+        const savedHistory = localStorage.getItem(MESSAGE_HISTORY_KEY);
+        if (savedHistory) {
+            messageHistory = JSON.parse(savedHistory);
+        }
+    } catch (error) {
+        console.warn('Failed to load message history from localStorage:', error);
+        messageHistory = [];
+    }
+
+    // Function to save a message to history
+    function saveMessageToHistory(message) {
+        try {
+            // Don't save empty messages
+            if (!message.trim()) return;
+
+            // Remove the message if it already exists to avoid duplicates
+            messageHistory = messageHistory.filter(function(item) {
+                return item !== message;
+            });
+
+            // Add the new message to the beginning of the array
+            messageHistory.unshift(message);
+
+            // Limit to MAX_HISTORY_ITEMS
+            if (messageHistory.length > MAX_HISTORY_ITEMS) {
+                messageHistory = messageHistory.slice(0, MAX_HISTORY_ITEMS);
+            }
+
+            // Save to localStorage
+            try {
+                localStorage.setItem(MESSAGE_HISTORY_KEY, JSON.stringify(messageHistory));
+            } catch (storageError) {
+                console.warn('Failed to save to localStorage:', storageError);
+            }
+        } catch (error) {
+            console.error('Error saving message to history:', error);
+        }
+    }
+
+    // Function to populate the history list
+    function populateHistoryList() {
+        try {
+            // Clear the current list
+            historyList.innerHTML = '';
+
+            // Add each history item to the list
+            messageHistory.forEach(message => {
+                const li = document.createElement('li');
+                li.className = 'history-item';
+                li.textContent = message;
+                li.addEventListener('click', function() {
+                    messageInput.value = message;
+                    hideHistoryPopup();
+                });
+                historyList.appendChild(li);
+            });
+
+            // Show a message if history is empty
+            if (messageHistory.length === 0) {
+                const li = document.createElement('li');
+                li.className = 'history-item';
+                li.textContent = 'No message history';
+                li.style.fontStyle = 'italic';
+                li.style.color = '#888';
+                historyList.appendChild(li);
+            }
+        } catch (error) {
+            console.error('Error populating history list:', error);
+        }
+    }
+
+    // Function to show history popup
+    function showHistoryPopup() {
+        try {
+            populateHistoryList();
+            historyPopup.style.display = 'block';
+        } catch (error) {
+            console.error('Error showing history popup:', error);
+        }
+    }
+
+    // Function to hide history popup
+    function hideHistoryPopup() {
+        try {
+            historyPopup.style.display = 'none';
+        } catch (error) {
+            console.error('Error hiding history popup:', error);
+        }
+    }
+
+    // Make sure document has proper height for scrolling
+    document.addEventListener('DOMContentLoaded', function() {
+        adjustLayout();
+    });
+
+    // Handle window resize
+    window.addEventListener('resize', function() {
+        adjustLayout();
+    });
+
+    // Adjust layout for proper scrolling
+    function adjustLayout() {
+        // Ensure the input is visible
+        messageInput.scrollIntoView(false);
+
+        // Notify Android of height changes
+        if (window.AndroidInterface && typeof window.AndroidInterface.onContentHeightChanged === 'function') {
+            window.AndroidInterface.onContentHeightChanged(document.body.scrollHeight);
+        }
+    }
+
+    // Configuration for Markdown parsing
+    marked.setOptions({
+        breaks: true, // Add line breaks as paragraphs
+        gfm: true     // Enable GitHub Flavored Markdown
+    });
+    marked.use({
+        extensions: [],
+        options: {
+            gfm: false,
+            strikethrough: false
+        },
+        tokenizer: {
+            del(src) {
+              // Return false to prevent strikethrough parsing
+              return false;
+            }
+        },
+        renderer: {
+            strikethrough: () => false
+        }
+
+    });
+
+    // Function to add a message to the chat
+    function addMessage(text, isUser = false) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+
+        // If it's a user message, just add the text
+        if (isUser) {
+            messageDiv.textContent = text;
+            chatMessages.appendChild(messageDiv);
+            scrollToBottom();
+        } else {
+            // For bot messages, we'll handle them separately
+            // since they could be streamed or complete
+            messageDiv.innerHTML = ''; // Start empty for streaming
+            chatMessages.appendChild(messageDiv);
+            scrollToBottom();
+            // Return the element for potential streaming updates
+            return messageDiv;
+        }
+        console.log('addMessage:', text, isUser);
+    }
+
+    let streamText = ''; // Placeholder for streaming text
+    // Function to handle streaming updates to a message
+    function updateStreamMessage(element, text, isComplete = false) {
+        console.log('update Streaming:', text);
+        if (!element) {
+            currentStreamMessageElement = addMessage('', false);
+            element = currentStreamMessageElement;
+        }
+
+        if (isComplete) {
+            // If it's the final update, render the complete markdown
+            element.innerHTML = marked.parse(streamText + text);
+            // Reset streaming state
+            isStreaming = false;
+            streamText = '';
+            currentStreamMessageElement = null;
+            console.log('isComplete == true');
+        } else {
+            // For partial updates, just show the raw text as it comes in
+            streamText += text;
+            element.innerHTML = marked.parse(streamText);
+            console.log('Streaming:', streamText);
+        }
+
+        //scrollToBottom();
+    }
+
+    // Function to receive messages from Android - supports streaming
+    function receiveMessageFromAndroid(markdown, isStream = false, isComplete = false) {
+        console.log('receiveMessageFromAndroid:', markdown, isStream, isComplete);
+        hideTypingIndicator();
+
+        if (isStream) {
+            updateStreamMessage(currentStreamMessageElement, markdown, isComplete);
+        } else {
+            const messageDiv = addMessage('', false);
+            messageDiv.innerHTML = marked.parse(markdown);
+            //scrollToBottom();
+        }
+    }
+
+    // Function to handle stream start
+    function startMessageStream() {
+        console.log('startMessageStream');
+        isStreaming = true;
+        currentStreamMessageElement = addMessage('', false);
+    }
+
+    // Function to scroll to bottom (compatible with WebView.scrollBy)
+    function scrollToBottom() {
+        // Use setTimeout to ensure this happens after DOM updates
+        setTimeout(() => {
+            // This calculates total scroll height and scrolls there
+            const scrollHeight = chatMessages.scrollHeight;
+            window.scrollTo(0, document.body.scrollHeight);
+
+            // Make this visible to Android
+            if (window.AndroidInterface && typeof window.AndroidInterface.onContentHeightChanged === 'function') {
+                window.AndroidInterface.onContentHeightChanged(document.body.scrollHeight);
+            }
+        }, 100);
+    }
+
+    // Function to show typing indicator
+    function showTypingIndicator() {
+        typingIndicator.style.display = 'block';
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Function to hide typing indicator
+    function hideTypingIndicator() {
+        typingIndicator.style.display = 'none';
+    }
+
+    // Function to send a message to Android
+    function sendMessageToAndroid(message) {
+        // Add user message to chat
+        addMessage(message, true);
+
+        // Save message to history
+        saveMessageToHistory(message);
+
+        // Show typing indicator
+        showTypingIndicator();
+
+        // Send message to Android
+        window.AndroidInterface.sendMessage(message);
+    }
+
+    // Make this function available globally so Android can call it
+    window.receiveMessageFromAndroid = receiveMessageFromAndroid;
+
+    // Event listeners
+    sendButton.addEventListener('click', function() {
+        const message = messageInput.value.trim();
+        if (message) {
+            sendMessageToAndroid(message);
+            messageInput.value = '';
+        }
+    });
+
+    messageInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            const message = messageInput.value.trim();
+            if (message) {
+                sendMessageToAndroid(message);
+                messageInput.value = '';
+            }
+        }
+    });
+
+    // History button event listener
+    historyButton.addEventListener('click', function(e) {
+        e.stopPropagation(); // Prevent event bubbling
+        showHistoryPopup();
+    });
+
+    // Close popup button event listener
+    closePopup.addEventListener('click', function(e) {
+        e.stopPropagation(); // Prevent event bubbling
+        hideHistoryPopup();
+    });
+
+    // Close popup when clicking outside
+    document.addEventListener('click', function(e) {
+        if (historyPopup.style.display === 'block' &&
+            !historyPopup.contains(e.target) &&
+            e.target !== historyButton) {
+            hideHistoryPopup();
+        }
+    });
+
+    // Initial setup - focus on input
+    messageInput.focus();
+</script>
+</body>
+</html>

@@ -45,7 +45,7 @@ class EpubReaderActivity: BrowserActivity() {
                         if (shouldGotoLastChapter) {
                             gotoLastChapter()
                         } else {
-                            gotoPosition(0, 0F)
+                            gotoFirstChapter()
                         }
                     }
                 }

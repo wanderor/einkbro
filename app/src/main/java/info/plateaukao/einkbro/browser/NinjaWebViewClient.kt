@@ -35,7 +35,6 @@ import info.plateaukao.einkbro.view.EBWebView
 import info.plateaukao.einkbro.view.dialog.DialogManager
 import info.plateaukao.einkbro.view.dialog.compose.AuthenticationDialogFragment
 import io.github.edsuns.adfilter.AdFilter
-import nl.siegmann.epublib.domain.Book
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.io.ByteArrayInputStream
@@ -53,7 +52,6 @@ class EBWebViewClient(
 
     private val webContentPostProcessor = WebContentPostProcessor()
     private var hasAdBlock: Boolean = true
-    var book: Book? = null
 
     private val adFilter: AdFilter = AdFilter.get()
 
@@ -63,6 +61,7 @@ class EBWebViewClient(
         this.hasAdBlock = enable
     }
 
+
     private var onPageFinishedAction: () -> Unit = {}
     fun setOnPageFinishedAction(action: () -> Unit) {
         onPageFinishedAction = action
@@ -70,6 +69,7 @@ class EBWebViewClient(
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
+
         if (config.adBlock) {
             adFilter.performScript(view, url)
         }
@@ -287,7 +287,6 @@ class EBWebViewClient(
             }
         }
 
-        processBookResource(uri)?.let { return it }
         processCustomFontRequest(uri)?.let { return it }
         dualCaptionProcessor.processUrl(url)?.let {
             ebWebView.dualCaption = it
@@ -298,20 +297,6 @@ class EBWebViewClient(
             )
         }
 
-        return null
-    }
-
-    private fun processBookResource(uri: Uri): WebResourceResponse? {
-        val currentBook = book ?: return null
-
-        if (uri.scheme == "img") {
-            val resource = currentBook.resources.getByHref(uri.host.toString())
-            return WebResourceResponse(
-                resource.mediaType.name,
-                "UTF-8",
-                ByteArrayInputStream(resource.data)
-            )
-        }
         return null
     }
 

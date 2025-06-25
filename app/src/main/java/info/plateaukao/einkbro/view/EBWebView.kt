@@ -19,12 +19,14 @@ import android.webkit.ValueCallback
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
+import androidx.lifecycle.LifecycleCoroutineScope
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import info.plateaukao.einkbro.BuildConfig
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.browser.BrowserController
+import info.plateaukao.einkbro.browser.ChatWebInterface
 import info.plateaukao.einkbro.browser.Cookie
 import info.plateaukao.einkbro.browser.EBClickHandler
 import info.plateaukao.einkbro.browser.EBDownloadListener
@@ -32,8 +34,10 @@ import info.plateaukao.einkbro.browser.EBWebChromeClient
 import info.plateaukao.einkbro.browser.EBWebViewClient
 import info.plateaukao.einkbro.browser.Javascript
 import info.plateaukao.einkbro.browser.JsWebInterface
+import info.plateaukao.einkbro.caption.DualCaptionProcessor
 import info.plateaukao.einkbro.database.BookmarkManager
 import info.plateaukao.einkbro.database.FaviconInfo
+import info.plateaukao.einkbro.preference.ChatGPTActionInfo
 import info.plateaukao.einkbro.preference.ConfigManager
 import info.plateaukao.einkbro.preference.DarkMode
 import info.plateaukao.einkbro.preference.FontType
@@ -92,6 +96,7 @@ open class EBWebView(
                 album.isTranslatePage = true
             }
         }
+    override var isAIPage: Boolean = false
 
     var isPlainText = false
 
@@ -177,6 +182,7 @@ open class EBWebView(
     }
 
     init {
+        isAIPage = false
         isForeground = false
         webViewClient =
             EBWebViewClient(this) { title, url -> browserController?.addHistory(title, url) }
@@ -402,6 +408,23 @@ open class EBWebView(
     }
 
     fun setAlbumCover(bitmap: Bitmap) = album.setAlbumCover(bitmap)
+
+    private var chatWebInterface: ChatWebInterface? = null
+    fun setupAiPage(lifecycleScope: LifecycleCoroutineScope, webContent: String) {
+        isAIPage = true
+        if (chatWebInterface == null) {
+            chatWebInterface = ChatWebInterface(lifecycleScope, this, webContent)
+        } else {
+            chatWebInterface?.updateWebContent(webContent)
+        }
+
+        addJavascriptInterface(chatWebInterface!!, "AndroidInterface")
+        loadUrl("file:///android_asset/chat.html")
+    }
+
+    fun runGptAction(gptActionInfo: ChatGPTActionInfo) {
+        chatWebInterface?.sendMessageWithGptActionInfo(gptActionInfo)
+    }
 
     private fun setAlbumCoverAndSyncDb(bitmap: Bitmap) {
         setAlbumCover(bitmap)
@@ -697,7 +720,9 @@ open class EBWebView(
 
     // only works in isReadModeOn
     suspend fun getRawText() = suspendCoroutine<String> { continuation ->
-        if (!isReaderModeOn) {
+        if (dualCaption != null) {
+            continuation.resume(DualCaptionProcessor().convertToHtml(dualCaption ?: ""))
+        } else if (!isReaderModeOn) {
             evaluateMozReaderModeJs {
                 evaluateJavascript(getReaderModeBodyTextJs) { text ->
                     if (text == "null") {

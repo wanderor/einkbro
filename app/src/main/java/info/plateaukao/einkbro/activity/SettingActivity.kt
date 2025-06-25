@@ -915,6 +915,37 @@ class SettingActivity : FragmentActivity() {
             R.string.setting_summary_chat_stream,
             config::enableOpenAiStream
         ),
+        DividerSettingItem(R.string.web_content_processing),
+        ListSettingWithEnumItem(
+            R.string.summary_gpt_type,
+            0,
+            R.string.setting_summary_summary_gpt_type,
+            config::gptForSummary,
+            listOf(
+                R.string.system_default,
+                R.string.openai,
+                R.string.self_hosted,
+                R.string.google_gemini
+            )
+        ),
+        ValueSettingItem(
+            R.string.setting_title_gpt_prompt_for_web_page,
+            0,
+            R.string.setting_summary_gpt_prompt_for_web_page,
+            config::gptUserPromptForWebPage
+        ),
+        ListSettingWithEnumItem(
+            R.string.web_processing_gpt_type,
+            0,
+            R.string.setting_summary_web_processing_gpt_type,
+            config::gptForChatWeb,
+            listOf(
+                R.string.system_default,
+                R.string.openai,
+                R.string.self_hosted,
+                R.string.google_gemini
+            )
+        ),
         DividerSettingItem(R.string.openai),
         ValueSettingItem(
             R.string.setting_title_edit_gpt_api_key,
@@ -935,10 +966,16 @@ class SettingActivity : FragmentActivity() {
             config::useOpenAiTts
         ),
         ValueSettingItem(
-            R.string.setting_title_gpt_prompt_for_web_page,
+            R.string.setting_title_gpt_audio_model_name,
             0,
-            R.string.setting_summary_gpt_prompt_for_web_page,
-            config::gptUserPromptForWebPage
+            R.string.setting_summary_gpt_audio_model_name,
+            config::gptVoiceModel
+        ),
+        ValueSettingItem(
+            R.string.setting_title_gpt_prompt_for_tts,
+            0,
+            R.string.setting_summary_gpt_prompt_for_tts,
+            config::gptVoicePrompt
         ),
         DividerSettingItem(R.string.openai_compatible_server),
         BooleanSettingItem(

@@ -8,9 +8,11 @@ import android.view.View.VISIBLE
 import android.view.ViewGroup
 import android.widget.RelativeLayout
 import androidx.appcompat.app.AlertDialog
+import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.LifecycleCoroutineScope
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.databinding.TranslationPanelBinding
+import info.plateaukao.einkbro.preference.ChatGPTActionInfo
 import info.plateaukao.einkbro.preference.ConfigManager
 import info.plateaukao.einkbro.preference.TranslationMode
 import info.plateaukao.einkbro.preference.toggle
@@ -169,8 +171,22 @@ class TwoPaneController(
         webView.loadUrl(url)
     }
 
+    fun showSecondPaneAsAi(webContent: String) {
+        showSecondPane()
+        webView.setupAiPage(lifecycleScope, webContent)
+        translationViewBinding.controlsContainer.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+            bottomMargin = 55.dp(activity)
+        }
+        translationViewBinding.expandedButton.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+            bottomMargin = 55.dp(activity)
+        }
+    }
+
+    suspend fun runGptAction(action: ChatGPTActionInfo) = webView.runGptAction(action)
+
     fun hideSecondPane() {
         toggleTranslationWindow(false)
+        webView.isAIPage = false
     }
 
     fun isSecondPaneDisplayed(): Boolean = twoPaneLayout.shouldShowSecondPane
@@ -343,6 +359,12 @@ class TwoPaneController(
             webView.loadUrl(BrowserUnit.URL_ABOUT_BLANK)
             twoPaneLayout.shouldShowSecondPane = false
             onTranslationClosed()
+            translationViewBinding.controlsContainer.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                bottomMargin = 0.dp(activity)
+            }
+            translationViewBinding.expandedButton.updateLayoutParams<ViewGroup.MarginLayoutParams> {
+                bottomMargin = 0.dp(activity)
+            }
         }
     }
 

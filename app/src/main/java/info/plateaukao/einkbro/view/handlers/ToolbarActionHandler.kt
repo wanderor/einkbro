@@ -43,6 +43,7 @@ class ToolbarActionHandler(
         ToolbarAction.Translation -> browserController.showTranslationConfigDialog(true)
         ToolbarAction.Tts -> TtsSettingDialogFragment().show(activity.supportFragmentManager, "TtsSettingDialog")
         ToolbarAction.Touch -> browserController.showTouchAreaDialog()
+        ToolbarAction.ChatWithWeb -> browserController.chatWithWeb(true)
         else -> {}
     }
 
@@ -90,5 +91,6 @@ class ToolbarActionHandler(
         ToolbarAction.SaveEpub -> browserController.showSaveEpubDialog()
         ToolbarAction.ShareLink -> browserController.shareLink()
         ToolbarAction.InvertColor -> browserController.invertColors()
+        ToolbarAction.ChatWithWeb -> browserController.chatWithWeb()
     }
 }
