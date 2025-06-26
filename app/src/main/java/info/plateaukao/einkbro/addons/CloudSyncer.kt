@@ -60,14 +60,19 @@ class CloudSyncer(
         // Size of vertical scroll bar, or 0 for auto
         private const val VERTICAL_SCROLL_BAR_SIZE: Int = 16
 
-        // Normalizes the URL of an album controller for dedup.
-        fun normalizeUrl(controller: AlbumController): String {
+        // Get the URL of an album controller.
+        fun getAlbumUrl(controller: AlbumController): String {
             var url = controller.albumUrl
             if (!url.startsWith("http")) {
                 url = controller.initAlbumUrl
-                if (!url.startsWith("http")) return ""
+                if (!url.startsWith("http")) url = ""
             }
-            return normalizeUrl(url)
+            return url
+        }
+
+        // Normalizes the URL of an album controller for dedup.
+        fun normalizeUrl(controller: AlbumController): String {
+            return normalizeUrl(getAlbumUrl(controller))
         }
 
         // Normalizes a URL for dedup.
@@ -691,19 +696,22 @@ class CloudSyncer(
     }
 
     // Lists normalized URLs of the currently open web pages in the local browser.
-    private fun listUrls(): Set<String> {
-        lateinit var result: Set<String>
+    private fun listUrls(normalize: Boolean = true): Set<String> {
+        lateinit var tabUrls: List<String>
+        var numTabs = 0
         helper.runAndWait(period = 1_000L) {
             val controllers = browserContainer.list()
-            val urls = controllers
+            tabUrls = controllers
                 .filter { !it.isTranslatePage }
-                .map { normalizeUrl(it) }
-                .filter { it.startsWith("http") }
-                .toSet()
-            helper.log("Listed ${urls.size} URLs from ${controllers.size} tabs")
-            result = urls
+                .map { getAlbumUrl(it) }
+            numTabs = controllers.size
         }
-        return result
+        val urls = tabUrls
+            .filter { it.startsWith("http") }
+            .run { if (normalize) map { normalizeUrl(it) } else this }
+            .toSet()
+        helper.log("Listed ${urls.size} URLs from $numTabs tabs")
+        return urls
     }
 
     // Opens the specified URLs in the local browser.
@@ -720,15 +728,13 @@ class CloudSyncer(
 
     // Closes the specified URLs in the local browser.
     private fun closeUrls(urls: Iterable<String>) {
-        val normalizedUrls = urls.map { normalizeUrl(it) }.toSet()
+        val normalizedUrlsToClose = urls.map { normalizeUrl(it) }.toSet()
+        val tabUrlsToClose = listUrls(false)
+            .filter { normalizedUrlsToClose.contains(normalizeUrl(it)) }
         helper.handler.post {
-            val controllers: Set<AlbumController> = browserContainer.list()
-                .filter { !it.isTranslatePage }
-                .filter { normalizedUrls.contains(normalizeUrl(it)) }
-                .toSet()
-            controllers.forEach {
-                browserController.removeAlbum(it, false)
-            }
+            val controllers = browserContainer.list()
+                .filter { tabUrlsToClose.contains(getAlbumUrl(it)) }
+            controllers.forEach { browserController.removeAlbum(it, false) }
         }
     }
 
