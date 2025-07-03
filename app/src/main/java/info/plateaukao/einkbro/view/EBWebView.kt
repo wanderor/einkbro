@@ -16,7 +16,6 @@ import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.ValueCallback
-import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.lifecycle.LifecycleCoroutineScope
@@ -363,6 +362,9 @@ open class EBWebView(
         super.loadUrl(url, additionalHttpHeaders)
     }
 
+    private var transformUrlAction: (String) -> String = { url -> url }
+    fun setTransformUrlAction(action: (String) -> String) { transformUrlAction = action }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun loadUrl(url: String) {
         album.isLoaded = true
@@ -400,7 +402,8 @@ open class EBWebView(
         settings.javaScriptEnabled = config.enableJavascript || javascript.isWhite(url)
         toggleCookieSupport(config.cookies || cookie.isWhite(url))
 
-        super.loadUrl(BrowserUnit.queryWrapper(context, strippedUrl), requestHeaders)
+        val transformedUrl = transformUrlAction(strippedUrl)
+        super.loadUrl(BrowserUnit.queryWrapper(context, transformedUrl), requestHeaders)
     }
 
     fun handlePocketRequestToken(requestToken: String) {

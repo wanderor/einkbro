@@ -189,7 +189,8 @@ class CloudSyncer(
 
     fun prepareWebView(webView: EBWebView) {
         webView.setOnPageFinishedAction { onPageFinished(webView) }
-        webView.setHandleUriAction {url -> handleUri(url)}
+        webView.setHandleUriAction { url -> handleUri(url) }
+        webView.setTransformUrlAction { url -> transformUrl(url) }
         if (VERTICAL_SCROLL_BAR_SIZE > 0) {  // customize scroll bar
             webView.isScrollbarFadingEnabled = false
             webView.scrollBarSize = VERTICAL_SCROLL_BAR_SIZE
@@ -212,14 +213,19 @@ class CloudSyncer(
         }
 
         helper.handler.postDelayed({
-            if (webView.albumUrl.startsWith("http")) {
+            val url = webView.albumUrl
+            if (url.startsWith("http")) {
                 if (isLoaded(webView)) {
-                    adjustReaderMode(webView, webView.albumUrl)
+                    adjustReaderMode(webView, url)
                 } else {
-                    loadUrlFromCache(webView, webView.albumUrl)
+                    val cacheUrl = getUrlFromCache(url)
+                    if (cacheUrl != url) {
+                        webView.initAlbumUrl = url
+                        webView.loadUrl(cacheUrl)
+                    }
                 }
-            } else if (webView.albumUrl.startsWith("file")) {
-                if (cacheRegex.matches(webView.albumUrl)) {
+            } else if (url.startsWith("file")) {
+                if (cacheRegex.matches(url)) {
                     loadTitleFromCache(webView, webView.initAlbumUrl)
                     adjustReaderMode(webView, webView.initAlbumUrl)
                 }
@@ -227,12 +233,16 @@ class CloudSyncer(
         }, 2_000)
     }
 
-    private fun handleUri(url: String): Boolean {
+    private fun handleUri(url: String): Boolean {  // whether to skip following of this link
         if (skipperUrlRegex.matches(url)) {
             helper.log(Log.DEBUG, "Skipping URL: $url")
             return true
         }
         return false
+    }
+
+    private fun transformUrl(url: String): String {
+        return if (offline and url.startsWith("http")) getUrlFromCache(url) else url
     }
 
     private fun applyConfig(config: CloudSyncerConfig) {
@@ -407,15 +417,24 @@ class CloudSyncer(
         prevUrls = openUrls subtract urlsToClose
         var urlsToOpenFirst: List<String> = listOf()
         var urlsToOpenLast: List<String> = listOf()
-        val slots = (config.slots - openUrls.size + urlsToClose.size).coerceIn(0, waitingUrls.size)
+        var slots = (config.slots - openUrls.size + urlsToClose.size).coerceIn(0, waitingUrls.size)
         if (slots > 0) {
-            val slotsFirst = maxOf(slots - urlsToClose.size, 1)
-            val slotsLast = slots - slotsFirst
-            urlsToOpenFirst = waitingUrls.take(slotsFirst)
-            waitingUrls = waitingUrls.drop(slotsFirst)
-            urlsToOpenLast = waitingUrls.take(slotsLast)
-            waitingUrls = waitingUrls.drop(slotsLast)
-            prevUrls = prevUrls union urlsToOpenFirst union urlsToOpenLast
+            if (offline) {
+                val (cached, nonCached) = synchronized(cachedUrls) {
+                    waitingUrls.partition { url -> cachedUrls.contains(url) }
+                }
+                waitingUrls = cached + nonCached
+                slots = minOf(slots, cached.size)
+            }
+            if (slots > 0) {
+                val slotsFirst = maxOf(slots - urlsToClose.size, 1)
+                val slotsLast = slots - slotsFirst
+                urlsToOpenFirst = waitingUrls.take(slotsFirst)
+                waitingUrls = waitingUrls.drop(slotsFirst)
+                urlsToOpenLast = waitingUrls.take(slotsLast)
+                waitingUrls = waitingUrls.drop(slotsLast)
+                prevUrls = prevUrls union urlsToOpenFirst union urlsToOpenLast
+            }
         }
 
         // Opens and closes URLs.
@@ -628,31 +647,20 @@ class CloudSyncer(
                           skip = { !offline && willForceSyncSoon() }) { index ->
             val (webView, url) = candidates[index]
             if (!isLoaded(webView) && webView.initAlbumUrl == url) {
-                preloadUrl(webView, url, offline)
+                helper.log(Log.DEBUG, "Preloading $url")
+                webView.initAlbumUrl = url
+                webView.loadUrl(url)
             }
         }
         helper.log("Preloaded ${candidates.size} inactive tabs")
     }
 
-    // Preloads the URL in the specified WebView.
-    private fun preloadUrl(webView: EBWebView, url: String, offline: Boolean) {
-        helper.log(Log.DEBUG, "Preloading $url")
-        if (offline) {
-            loadUrlFromCache(webView, url)
-        } else {
-            webView.loadUrl(url)
-        }
-    }
-
-    // Load URL from local cache if available.
-    private fun loadUrlFromCache(webView: EBWebView, url: String) {
+    // Get URL from local cache if available, or return the original URL.
+    private fun getUrlFromCache(url: String): String {
         val path = synchronized(cachedUrls) {
             cachedUrls[url]?.path ?: ""
         }
-        if (path.isBlank() || !File(path).exists()) return
-        helper.log(Log.DEBUG, "Loading $url from cache: $path")
-        webView.initAlbumUrl = url
-        webView.loadUrl("file://$path")
+        return if (path.isBlank() || !File(path).exists()) url else "file://$path"
     }
 
     // Load page title from local cache if available.
