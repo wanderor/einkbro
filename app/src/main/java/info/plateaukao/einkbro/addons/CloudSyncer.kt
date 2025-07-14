@@ -57,8 +57,6 @@ class CloudSyncer(
         private const val MAX_RECENTLY_WORKED_URLS: Int = 1_000
         // Maximal number of URLs to attempt to cache in each round.
         private const val MAX_CACHE_ATTAMPTS: Int = 5
-        // Size of vertical scroll bar, or 0 for auto
-        private const val VERTICAL_SCROLL_BAR_SIZE: Int = 16
 
         // Get the URL of an album controller.
         fun getAlbumUrl(controller: AlbumController): String {
@@ -191,9 +189,9 @@ class CloudSyncer(
         webView.setOnPageFinishedAction { onPageFinished(webView) }
         webView.setHandleUriAction { url -> handleUri(url) }
         webView.setTransformUrlAction { url -> transformUrl(url) }
-        if (VERTICAL_SCROLL_BAR_SIZE > 0) {  // customize scroll bar
+        if (config.scroller > 0) {  // customize scroll bar
             webView.isScrollbarFadingEnabled = false
-            webView.scrollBarSize = VERTICAL_SCROLL_BAR_SIZE
+            webView.scrollBarSize = config.scroller
         }
     }
 

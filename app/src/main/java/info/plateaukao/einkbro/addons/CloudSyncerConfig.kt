@@ -38,6 +38,8 @@ data class CloudSyncerConfig(
     val heartbeat: Int = 30,
     // Duration to display a message in seconds.
     val display: Int = 15,
+    // Size of vertical scroll bar, or 0 for auto.
+    val scroller: Int = 16,
     // Regular expression pattern for URLs to preload in reader mode.
     val reader: String = "",
     // Regular expression pattern for URLs to skip loading.
