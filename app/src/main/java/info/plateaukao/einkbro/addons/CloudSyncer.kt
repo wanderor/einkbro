@@ -136,6 +136,8 @@ class CloudSyncer(
     // - timestamp string written in the file.
     private var lastCloudMtime: Long = 0
     private var lastUpdateTime: String = ""
+    // Timestamp of the last cache cleaning action.
+    private var lastCacheCleaningTime: Long = 0
     // Previously seen open URLs in local device.
     private var prevUrls: Set<String> = setOf<String>()
     // URLs received from the cloud but not yet open (i.e. throttled).
@@ -161,6 +163,9 @@ class CloudSyncer(
     // URLs that we recently worked on and should avoid duplicate work.
     private var recentlyCachedUrls: MutableSet<String> = mutableSetOf()
     private var recentlyAdjustedUrls: MutableSet<String> = mutableSetOf()
+    // Whether the syncer is started.
+    private var syncerStarted: Boolean = false
+    // Whether the device is offline.
     private var offline: Boolean = false
 
     // For loading configuration file flexibly.
@@ -200,18 +205,17 @@ class CloudSyncer(
         configLoader = ConfigLoader(name, CloudSyncerConfig.serializer(),
             context, registry) { config, _ ->
             applyConfig(config)
-            start()
+            startTimer()
         }
     }
 
     private fun onPageFinished(webView: EBWebView) {
-        if (webView.albumUrl.startsWith("http") &&
-            prevUrls.isNotEmpty() && webView.albumUrl !in prevUrls) {
+        val url = webView.albumUrl
+        if (url.startsWith("http") && prevUrls.isNotEmpty() && normalizeUrl(url) !in prevUrls) {
             scheduleForceSync()
         }
 
         helper.handler.postDelayed({
-            val url = webView.albumUrl
             if (url.startsWith("http")) {
                 if (isLoaded(webView)) {
                     adjustReaderMode(webView, url)
@@ -252,9 +256,27 @@ class CloudSyncer(
         agent.applyConfig(config)
     }
 
-    // Starts periodic sync.
+    // Starts timer for periodical sync.
     // Precondition: configuration is ready.
-    private fun start() {
+    private fun startTimer() {
+        timer(
+            daemon = true, initialDelay = config.startup * 1_000L,
+            period = config.heartbeat * 1_000L
+        ) {
+            try {
+                if (!syncerStarted) {
+                    startSyncer()
+                    syncerStarted = true
+                }
+                heartbeat()
+            } catch (e: Exception) {
+                helper.log(Log.ERROR, "Heartbeat failed: ${e.stackTraceToString()}")
+            }
+        }
+    }
+
+    // Initializes syncer state.
+    private fun startSyncer() {
         helper.log("Starting")
         readerUrlRegex = Regex(config.reader)
         skipperUrlRegex = Regex(config.skipper)
@@ -262,21 +284,6 @@ class CloudSyncer(
         updateCachePages()
 
         agent.start()
-        startTimer()
-    }
-
-    // Starts timer for periodical sync.
-    private fun startTimer() {
-        timer(
-            daemon = true, initialDelay = config.startup * 1_000L,
-            period = config.heartbeat * 1_000L
-        ) {
-            try {
-                heartbeat()
-            } catch (e: Exception) {
-                helper.log(Log.ERROR, "Heartbeat failed: ${e.stackTraceToString()}")
-            }
-        }
     }
 
     private fun heartbeat() {
@@ -329,15 +336,18 @@ class CloudSyncer(
 
     // Loads state.
     private fun loadState() {
+        // Note: re-normalizes URLs in case the URL normalization algorithm changes.
         sharedPreferences.getString("waitingUrls", null)?.let { str ->
             waitingUrls = Json.decodeFromString(str)
             waitingUrls = waitingUrls.map { normalizeUrl(it) }.toSet().toList()
         }
         sharedPreferences.getString("recentUrls", null)?.let { str ->
             recentUrls = Json.decodeFromString(str)
+            recentUrls = recentUrls.mapKeys { normalizeUrl(it.key) }.toMutableMap()
         }
         sharedPreferences.getString("cachedUrls", null)?.let { str ->
             cachedUrls = Json.decodeFromString(str)
+            cachedUrls = cachedUrls.mapKeys { normalizeUrl(it.key) }.toMutableMap()
         }
         nextCachedUrlId = sharedPreferences.getLong("nextCachedUrlId", 0)
         helper.log("Loaded: ${waitingUrls.size} waiting, ${recentUrls.size} recent, ${cachedUrls.size} cached")
@@ -382,8 +392,7 @@ class CloudSyncer(
         val merger = Merger(curUrls = openUrls union waitingUrls)
         if (config.receiving && !shortcut) {
             if (mergeFromCloud(merger)) {
-                merger.closedUrlsInCloud.forEach { (cloudUrl, timestamp) ->
-                    val url = normalizeUrl(cloudUrl)
+                merger.closedUrlsInCloud.forEach { (url, timestamp) ->
                     val old = recentUrls.getOrDefault(url, 0)
                     if (timestamp > old) recentUrls[url] = timestamp
                 }
@@ -480,8 +489,9 @@ class CloudSyncer(
             if (state.version == "1.0.0") {
                 if (state.timestamp > lastUpdateTime) {
                     merger.cloudSource = state.name
+                    // Note: normalizes URLs in case the URL normalization algorithm changes.
                     merger.urlsInCloud = state.urls.map { normalizeUrl(it) }.toSet()
-                    merger.closedUrlsInCloud = state.closed
+                    merger.closedUrlsInCloud = state.closed.mapKeys { normalizeUrl(it.key) }
                     merger.urlsToOpen = (merger.urlsInCloud subtract merger.curUrls).filter { url ->
                         !recentUrls.contains(url)
                     }.toSet()
@@ -604,20 +614,25 @@ class CloudSyncer(
 
     // Cleans cache of recently closed URLs. Removes obsolete URLs and limit cache size.
     private fun cleanCachedUrls(now: Long) {
-        var count = 0
-        cachedUrls = cachedUrls.filterValues {
-            now - it.timestamp < config.lifetime * 1_000L
+        if (now - lastCacheCleaningTime < 86_400_000L) return
+        lastCacheCleaningTime = now
+
+        val urlsNeeded = prevUrls union waitingUrls.toSet()
+        cachedUrls = cachedUrls.filter { (url, info) ->
+            url in urlsNeeded || now - info.timestamp < config.lifetime * 1_000L
         }.toMutableMap()
+
+        var count = 0
         context.externalCacheDir?.let { dir ->
             val cachedPaths = cachedUrls.map { it.value.path }.toSet()
-            dir.listFiles()?.filter { cacheRegex.matches(it.path) && !cachedPaths.contains(it.path) }
+            dir.listFiles()
+                ?.filter { cacheRegex.matches(it.path) && !cachedPaths.contains(it.path) }
                 ?.map {
                     helper.log(Log.DEBUG, "Deleting cache file: ${it.path}")
                     it.delete()
                     ++count
                 }
         }
-
         if (count > 0) {
             helper.display("Cache: $count purged")
         }
