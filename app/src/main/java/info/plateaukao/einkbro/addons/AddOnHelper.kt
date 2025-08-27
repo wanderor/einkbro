@@ -114,6 +114,19 @@ class AddOnHelper(
         handler.post { helper() }
     }
 
+    // Converts logging priority to string.
+    fun getPriorityString(priority: Int): String {
+        return when (priority) {
+            Log.VERBOSE -> "V"
+            Log.DEBUG -> "D"
+            Log.INFO -> "I"
+            Log.WARN -> "W"
+            Log.ERROR -> "E"
+            Log.ASSERT -> "A"
+            else -> "?"
+        }
+    }
+
     // Logs at INFO priority.
     fun log(message: String) {
         log(Log.INFO, message)
@@ -130,11 +143,11 @@ class AddOnHelper(
             externalLogFile = File(path)
             Log.i(tag, "Opened external log file at $path")
         }
-        externalLogFile?.let {
+        externalLogFile?.let { f ->
             val timestamp = logDateFormat.format(Date())
-            val text = "$timestamp  $message\n"
+            val text = "$timestamp  ${getPriorityString(priority)}  $message\n"
             try {
-                it.appendText(text)
+                f.appendText(text)
             } catch (e: IOException) {
                 // ignored
             }
