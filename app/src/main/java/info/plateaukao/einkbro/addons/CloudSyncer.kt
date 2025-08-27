@@ -79,7 +79,7 @@ class CloudSyncer(
                 val uri = URI.create(url)
 
                 val paramsToKeep = if (uri.host == "mp.weixin.qq.com") {
-                    setOf("__biz", "mid", "idx", "sn")
+                    setOf("__biz", "idx", "mid", "sn", "poc_token")
                 } else {
                     null
                 }
@@ -752,6 +752,7 @@ class CloudSyncer(
         val normalizedUrlsToClose = urls.map { normalizeUrl(it) }.toSet()
         val tabUrlsToClose = listUrls(false)
             .filter { normalizedUrlsToClose.contains(normalizeUrl(it)) }
+            .onEach { helper.log(Log.DEBUG, "Closing $it") }
         helper.handler.post {
             val controllers = browserContainer.list()
                 .filter { tabUrlsToClose.contains(getAlbumUrl(it)) }
