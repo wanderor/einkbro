@@ -68,44 +68,6 @@ class CloudSyncer(
             return url
         }
 
-        // Normalizes the URL of an album controller for dedup.
-        fun normalizeUrl(controller: AlbumController): String {
-            return normalizeUrl(getAlbumUrl(controller))
-        }
-
-        // Normalizes a URL for dedup.
-        fun normalizeUrl(url: String): String {
-            return try {
-                val uri = URI.create(url)
-
-                val paramsToKeep = if (uri.host == "mp.weixin.qq.com") {
-                    setOf("__biz", "idx", "mid", "sn", "poc_token")
-                } else {
-                    null
-                }
-
-                // Filter query params.
-                val filteredParams = if (paramsToKeep == null) uri.query else
-                    uri.query.split("&")
-                        .map { it.split("=", limit = 2) }
-                        .filter { it.isNotEmpty() && paramsToKeep.contains(it[0]) }
-                        .sortedBy { it[0] }
-                        .joinToString("&") {
-                            it[0] + if (it.size > 1) "=" + it[1] else ""
-                        }
-
-                URI(
-                    uri.scheme,
-                    uri.authority,
-                    uri.path,
-                    filteredParams.ifEmpty { null },
-                    uri.fragment
-                ).toString()
-            } catch (e: Exception) {
-                url  // failed to parse URL
-            }
-        }
-
         // Checks whether a WebView instance is indeed loaded.
         private fun isLoaded(webView: EBWebView): Boolean {
             // TODO: add i18n support
@@ -118,6 +80,8 @@ class CloudSyncer(
 
     @Serializable
     data class CachedUrlInfo(val path: String, val title: String, val timestamp: Long)
+
+    data class UrlRule(val pattern: Regex, val reading: Boolean, val skipping: Boolean, val params: Set<String>)
 
     // For loading and persisting state. Note backward compatibility.
     private val sharedPreferences: SharedPreferences =
@@ -147,10 +111,7 @@ class CloudSyncer(
     private var writtenClosedUrls: Map<String, Long> = mapOf()
     // Cache of recently closed URLs in local device and seen in the cloud.
     private var recentUrls: MutableMap<String, Long> = mutableMapOf()
-    // Regular expression pattern of URLs to preload in reader mode
-    private var readerUrlRegex: Regex = Regex("")
-    // Regular expression pattern of URLs to skip loading
-    private var skipperUrlRegex: Regex = Regex("")
+    private var urlRules: List<UrlRule> = listOf()
     // Regular expression pattern of URLs/paths for local cache.
     // Note: must be synced with cacheUrl().
     private val cacheRegex = Regex(""".*/cache-\d+\.mht""")
@@ -236,7 +197,7 @@ class CloudSyncer(
     }
 
     private fun handleUri(url: String): Boolean {  // whether to skip following of this link
-        if (skipperUrlRegex.matches(url)) {
+        if (urlRules.any { it.skipping && it.pattern.matches(url) }) {
             helper.log(Log.DEBUG, "Skipping URL: $url")
             return true
         }
@@ -278,8 +239,11 @@ class CloudSyncer(
     // Initializes syncer state.
     private fun startSyncer() {
         helper.log("Starting")
-        readerUrlRegex = Regex(config.reader)
-        skipperUrlRegex = Regex(config.skipper)
+
+        urlRules = config.urls.map { config ->
+            UrlRule(Regex(config.pattern), config.reading, config.skipping, config.params.toSet())
+        }
+
         loadState()
         updateCachePages()
 
@@ -687,11 +651,13 @@ class CloudSyncer(
 
     // Enter or exit reader mode as appropriate.
     private fun adjustReaderMode(webView: EBWebView, url: String) {
-        if (!recentlyAdjustedUrls.contains(url) &&
-            readerUrlRegex.matches(url) != webView.isReaderModeOn) {
-            helper.log(Log.DEBUG, "Toggling reader mode from ${webView.isReaderModeOn} for $url")
-            recentlyAdjustedUrls.add(url)
-            webView.toggleReaderMode()
+        if (!recentlyAdjustedUrls.contains(url)) {
+            val reading = urlRules.any { it.reading && it.pattern.matches(url) }
+            if (reading != webView.isReaderModeOn) {
+                helper.log(Log.DEBUG, "Toggling reader mode from ${webView.isReaderModeOn} for $url")
+                recentlyAdjustedUrls.add(url)
+                webView.toggleReaderMode()
+            }
         }
     }
 
@@ -757,6 +723,39 @@ class CloudSyncer(
             val controllers = browserContainer.list()
                 .filter { tabUrlsToClose.contains(getAlbumUrl(it)) }
             controllers.forEach { browserController.removeAlbum(it, false) }
+        }
+    }
+
+    // Normalizes the URL of an album controller for dedup.
+    fun normalizeUrl(controller: AlbumController): String {
+        return normalizeUrl(getAlbumUrl(controller))
+    }
+
+    // Normalizes a URL for dedup.
+    fun normalizeUrl(url: String): String {
+        return try {
+            val uri = URI.create(url)
+
+            // Filter query params.
+            val filteredParams = urlRules.find { it.pattern.matches(url) }?.let { rule ->
+                uri.query.split("&")
+                    .map { it.split("=", limit = 2) }
+                    .filter { it.isNotEmpty() && rule.params.contains(it[0]) }
+                    .sortedBy { it[0] }
+                    .joinToString("&") {
+                        it[0] + if (it.size > 1) "=" + it[1] else ""
+                    }
+            } ?: uri.query
+
+            URI(
+                uri.scheme,
+                uri.authority,
+                uri.path,
+                filteredParams.ifEmpty { null },
+                uri.fragment
+            ).toString()
+        } catch (e: Exception) {
+            url  // failed to parse URL
         }
     }
 

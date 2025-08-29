@@ -2,6 +2,19 @@ package info.plateaukao.einkbro.addons
 
 import kotlinx.serialization.Serializable
 
+// Represents URL configuration data.
+@Serializable
+data class UrlConfig(
+    // Regular expression pattern for URLs that should apply this config.
+    val pattern: String = "",
+    // Whether to preload in reader mode.
+    val reading: Boolean = false,
+    // Whether to skip loading.
+    val skipping: Boolean = false,
+    // If not empty, only keep the specified query params.
+    val params: List<String> = listOf(),
+)
+
 // Represents configuration data of CloudSyncer.
 @Serializable
 data class CloudSyncerConfig(
@@ -40,10 +53,8 @@ data class CloudSyncerConfig(
     val display: Int = 15,
     // Size of vertical scroll bar, or 0 for auto.
     val scroller: Int = 16,
-    // Regular expression pattern for URLs to preload in reader mode.
-    val reader: String = "",
-    // Regular expression pattern for URLs to skip loading.
-    val skipper: String = "",
+    // List of URL configurations.
+    val urls: List<UrlConfig> = listOf(),
     // For debugging release version.
     // Whether to turn on logging to external file.
     val logging: Boolean = false

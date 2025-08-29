@@ -2077,7 +2077,7 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
         closeTabConfirmation {
             cloudSyncer.onPageRemoved()
             if (config.isSaveHistoryWhenClose()) {
-                addHistory(albumController.albumTitle, CloudSyncer.normalizeUrl(albumController))
+                addHistory(albumController.albumTitle, cloudSyncer.normalizeUrl(albumController))
             }
 
             albumViewModel.removeAlbum(albumController.album)
